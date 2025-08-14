@@ -92,12 +92,13 @@ def update_graph_live(stored_data, selected_timeframe):
     df_calc = df_display.tail(CANDLE_LIMIT_CALC).copy()
 
     # Tính toán chỉ báo
-    df_calc['is_bullish_fvg'] = df_calc['high'].shift(3) < df_calc['low'].shift(1)
-    df_calc['bullish_fvg_top'] = df_calc['low'].shift(1)
-    df_calc['bullish_fvg_bottom'] = df_calc['high'].shift(3)
-    df_calc['is_bearish_fvg'] = df_calc['low'].shift(3) > df_calc['high'].shift(1)
-    df_calc['bearish_fvg_top'] = df_calc['low'].shift(3)
-    df_calc['bearish_fvg_bottom'] = df_calc['high'].shift(1)
+    df_calc['is_bullish_fvg'] = df_calc['high'].shift(0) < df_calc['low'].shift(-2)
+    df_calc['bullish_fvg_top'] = df_calc['low'].shift(-2)
+    df_calc['bullish_fvg_bottom'] = df_calc['high']
+
+    df_calc['is_bearish_fvg'] = df_calc['low'] > df_calc['high'].shift(-2)
+    df_calc['bearish_fvg_top'] = df_calc['low']
+    df_calc['bearish_fvg_bottom'] = df_calc['high'].shift(-2)
 
     structure_high, structure_low, breaks, fibo_levels, structure_high_idx, structure_low_idx = calculate_market_structure(
         df_calc)
