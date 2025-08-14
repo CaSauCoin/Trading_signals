@@ -1,110 +1,109 @@
 # app.py
 
 import dash
-from dash import dcc, html
+from dash import dcc, html, no_update
 from dash.dependencies import Input, Output
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
 import pandas as pd
 from io import StringIO
-from craw_data import fetch_ohlcv, calculate_market_structure
+from craw_data import fetch_ohlcv, calculate_market_structure, get_binance_usdt_pairs
 
-# --- CẤU HÌNH ---
-SYMBOL_TO_TRADE = 'ETH/USDT'
-CANDLE_LIMIT_DISPLAY = 200
+# --- CONFIGURATION ---
+CANDLE_LIMIT_DISPLAY = 300
 CANDLE_LIMIT_CALC = 120
 EXCHANGE = 'binance'
-# Cập nhật dữ liệu nền sau mỗi 15 phút (15 * 60 * 1000 = 900000 ms)
 DATA_FETCH_INTERVAL_MS = 900000
 TIMEFRAMES = ['1h', '4h', '1d', '3d', '1w']
 
-# Khởi tạo ứng dụng Dash
+# GET TOKEN LIST ON APP START
+AVAILABLE_TOKENS = get_binance_usdt_pairs()
+
+# Initialize Dash app
 app = dash.Dash(__name__)
 
-# Giao diện của ứng dụng web
+# App layout
 app.layout = html.Div(id='root', children=[
-    # Kho chứa dữ liệu, không thay đổi
-    dcc.Store(id='data-store'),
+    html.H1(id='main-title', style={'textAlign': 'center', 'padding': '10px'}),
 
-    html.H1(f'Dashboard Real-time cho {SYMBOL_TO_TRADE}', style={'textAlign': 'center', 'padding': '10px'}),
+    html.Div([
+        dcc.Dropdown(
+            id='token-selector',
+            options=[{'label': token, 'value': token} for token in AVAILABLE_TOKENS],
+            value='BTC/USDT',
+            searchable=True,
+            placeholder="Select or search for a token...",
+            style={'width': '300px'}
+        ),
+        dcc.RadioItems(
+            id='timeframe-selector',
+            options=[{'label': tf.upper(), 'value': tf} for tf in TIMEFRAMES],
+            value='4h',
+            labelStyle={'display': 'inline-block', 'margin': '0 10px'},
+        ),
+    ], style={'display': 'flex', 'justifyContent': 'center', 'alignItems': 'center', 'gap': '30px',
+              'paddingBottom': '10px'}),
 
-    # Nút chọn khung thời gian, không thay đổi
-    dcc.RadioItems(
-        id='timeframe-selector',
-        options=[{'label': tf.upper(), 'value': tf} for tf in TIMEFRAMES],
-        value='4h',
-        labelStyle={'display': 'inline-block', 'margin': '0 10px'},
-        style={'textAlign': 'center', 'paddingBottom': '10px'}
+    dcc.Loading(
+        id="loading-chart",
+        type="default",
+        children=dcc.Graph(
+            id='live-graph',
+            style={'height': '80vh'}
+        )
     ),
 
-    dcc.Graph(id='live-graph'),
-
-    # Chỉ cần một Interval để lấy dữ liệu nền định kỳ
-    dcc.Interval(
-        id='data-fetch-interval',
-        interval=DATA_FETCH_INTERVAL_MS,
-        n_intervals=0
-    )
+    dcc.Interval(id='data-fetch-interval', interval=DATA_FETCH_INTERVAL_MS, n_intervals=0)
 ])
 
 
-# --- CALLBACK 1: LẤY DỮ LIỆU NỀN (Không đổi) ---
-# Callback này vẫn chạy 15 phút một lần để lấy dữ liệu mới và đưa vào 'data-store'
 @app.callback(
-    Output('data-store', 'data'),
-    Input('data-fetch-interval', 'n_intervals')
+    [Output('live-graph', 'figure'),
+     Output('main-title', 'children')],
+    [Input('data-fetch-interval', 'n_intervals'),
+     Input('token-selector', 'value'),
+     Input('timeframe-selector', 'value')]
 )
-def update_data_store(n):
-    # Khi callback này chạy xong và 'data-store' có dữ liệu mới,
-    # nó sẽ tự động kích hoạt callback vẽ biểu đồ bên dưới.
-    print(f"--- Bắt đầu tác vụ nền (15 phút/lần): Lấy dữ liệu mới (lần {n}) ---")
-    all_data = {}
-    for tf in TIMEFRAMES:
-        df = fetch_ohlcv(EXCHANGE, SYMBOL_TO_TRADE, tf, CANDLE_LIMIT_DISPLAY)
-        if df is not None:
-            all_data[tf] = df.to_json(date_format='iso', orient='split')
-    print("--- Tác vụ nền hoàn tất ---")
-    return all_data
+def update_graph_live(n, selected_symbol, selected_timeframe):
+    # This callback is triggered every 15 minutes, or when a new token or timeframe is selected.
+    # The loading animation will appear while this callback is running.
 
+    if not selected_symbol:
+        fig = go.Figure()
+        fig.update_layout(title_text="Please select a token to start", template='plotly_white')
+        return fig, "Real-time Dashboard"
 
-# ========================================================= #
-# == CALLBACK 2: VẼ BIỂU ĐỒ (ĐÃ THAY ĐỔI LOGIC KÍCH HOẠT) == #
-# ========================================================= #
-@app.callback(
-    Output('live-graph', 'figure'),
-    [Input('data-store', 'data'),  # KÍCH HOẠT 1: Khi có dữ liệu mới trong kho (15 phút/lần)
-     Input('timeframe-selector', 'value')]  # KÍCH HOẠT 2: Khi người dùng chọn khung thời gian mới
-)
-def update_graph_live(stored_data, selected_timeframe):
-    # Loại bỏ tham số 'n' không còn cần thiết
-    if not stored_data:
-        print("Kho dữ liệu rỗng, đang chờ tác vụ nền...")
-        return dash.no_update  # Ngăn không cho callback chạy khi chưa có dữ liệu
+    # 1. Fetch data
+    df_display = fetch_ohlcv(EXCHANGE, selected_symbol, selected_timeframe, CANDLE_LIMIT_DISPLAY)
 
-    print(f"Vẽ lại biểu đồ cho khung {selected_timeframe.upper()}...")
+    new_title = f"{selected_symbol}"
 
-    json_data_for_tf = stored_data.get(selected_timeframe)
-    if not json_data_for_tf:
-        return dash.no_update
+    if df_display is None or df_display.empty:
+        fig = go.Figure()
+        fig.update_layout(title_text=f"No data for {selected_symbol} - {selected_timeframe.upper()}",
+                          template='plotly_white')
+        return fig, new_title
 
-    df_display = pd.read_json(StringIO(json_data_for_tf), orient='split')
+    # 2. Calculate indicators
     df_calc = df_display.tail(CANDLE_LIMIT_CALC).copy()
 
-    # Tính toán chỉ báo
-    df_calc['is_bullish_fvg'] = df_calc['high'].shift(0) < df_calc['low'].shift(-2)
-    df_calc['bullish_fvg_top'] = df_calc['low'].shift(-2)
-    df_calc['bullish_fvg_bottom'] = df_calc['high']
-
-    df_calc['is_bearish_fvg'] = df_calc['low'] > df_calc['high'].shift(-2)
-    df_calc['bearish_fvg_top'] = df_calc['low']
-    df_calc['bearish_fvg_bottom'] = df_calc['high'].shift(-2)
+    df_calc['is_bullish_fvg'] = df_calc['high'].shift(2) < df_calc['low']
+    df_calc['bullish_fvg_top'] = df_calc['low']
+    df_calc['bullish_fvg_bottom'] = df_calc['high'].shift(2)
+    df_calc['is_bearish_fvg'] = df_calc['low'].shift(2) > df_calc['high']
+    df_calc['bearish_fvg_top'] = df_calc['low'].shift(2)
+    df_calc['bearish_fvg_bottom'] = df_calc['high']
 
     structure_high, structure_low, breaks, fibo_levels, structure_high_idx, structure_low_idx = calculate_market_structure(
         df_calc)
-    if structure_high is None:
-        return dash.no_update
 
+    if structure_high is None:
+        fig = go.Figure()
+        fig.update_layout(title_text=f"Not enough data to calculate indicators", template='plotly_white')
+        return fig, new_title
+
+    # 3. Draw chart
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
 
     volume_colors = ['green' if row.close >= row.open else 'red' for index, row in df_display.iterrows()]
@@ -114,20 +113,19 @@ def update_graph_live(stored_data, selected_timeframe):
     fig.add_trace(go.Bar(x=df_display.index, y=df_display['volume'], name='Volume', marker_color=volume_colors), row=2,
                   col=1)
 
-    candle_duration = df_calc.index[-1] - df_calc.index[-2] if len(df_calc) > 1 else pd.Timedelta(
-        hours=1)  # Xử lý trường hợp có ít nến
+    candle_duration = df_calc.index[1] - df_calc.index[0] if len(df_calc.index) > 1 else pd.Timedelta(hours=1)
     last_candle_time = df_display.index[-1]
 
-    bullish_fvgs = df_calc.loc[(df_calc['is_bullish_fvg'])]
+    bullish_fvgs = df_calc[df_calc['is_bullish_fvg']]
     for i, fvg in bullish_fvgs.iterrows():
-        start_time = i - 2 * candle_duration
+        start_time = i + candle_duration
         fig.add_shape(type="rect", x0=start_time, y0=fvg['bullish_fvg_bottom'], x1=last_candle_time,
                       y1=fvg['bullish_fvg_top'], line=dict(color="rgba(0,0,0,0)"), fillcolor="rgba(0, 255, 0, 0.15)",
                       layer="below", row=1, col=1)
 
-    bearish_fvgs = df_calc.loc[(df_calc['is_bearish_fvg'])]
+    bearish_fvgs = df_calc[df_calc['is_bearish_fvg']]
     for i, fvg in bearish_fvgs.iterrows():
-        start_time = i - 2 * candle_duration
+        start_time = i + candle_duration
         fig.add_shape(type="rect", x0=start_time, y0=fvg['bearish_fvg_bottom'], x1=last_candle_time,
                       y1=fvg['bearish_fvg_top'], line=dict(color="rgba(0,0,0,0)"), fillcolor="rgba(255, 0, 0, 0.15)",
                       layer="below", row=1, col=1)
@@ -151,24 +149,42 @@ def update_graph_live(stored_data, selected_timeframe):
 
     if fibo_levels:
         fibo_start_idx = min(structure_high_idx, structure_low_idx)
-        fibo_colors = {0.382: 'lightyellow', 0.5: 'lightsalmon', 0.618: 'lightpink', 0.705: 'lavender',
-                       0.786: 'lightskyblue'}
+        fibo_colors = {0.382: 'rgba(255, 255, 0, 0.5)', 0.5: 'rgba(255, 165, 0, 0.5)',
+                       0.618: 'rgba(255, 105, 180, 0.5)', 0.705: 'rgba(230, 230, 250, 0.8)',
+                       0.786: 'rgba(135, 206, 250, 0.7)'}
         for level in fibo_levels:
             ratio = level['ratio']
-            color = fibo_colors.get(ratio, 'gray')  # Màu mặc định nếu không tìm thấy
+            color = fibo_colors.get(ratio, 'gray')
             fig.add_shape(type="line", x0=fibo_start_idx, y0=level['price'], x1=last_candle_time, y1=level['price'],
-                          line=dict(color=color, width=2, dash="dash"), row=1, col=1)
-            fig.add_annotation(x=fibo_start_idx, y=level['price'], text=f"{ratio}", showarrow=False,
-                               xanchor="right", xshift=-5, font=dict(color=color, size=10), row=1, col=1)
+                          line=dict(color=color, width=1.5, dash="dot"), row=1, col=1)
+            fig.add_annotation(x=fibo_start_idx, y=level['price'], text=f"{ratio}", showarrow=False, xanchor="right",
+                               xshift=-5,
+                               font=dict(color=color.replace('0.5', '1').replace('0.7', '1').replace('0.8', '1'),
+                                         size=10, weight='bold'), row=1, col=1)
 
-    fig.update_layout(
-        title_text=f'Cập nhật khung {selected_timeframe.upper()} lúc: {time.strftime("%Y-%m-%d %H:%M:%S")}',
-        template='plotly_white', xaxis_rangeslider_visible=False, legend_traceorder="reversed")
-    fig.update_yaxes(title_text="Giá (USDT)", row=1, col=1)
+    last_candle = df_display.iloc[-1]
+    current_price = last_candle['close']
+    current_price_color = 'green' if last_candle['close'] >= last_candle['open'] else 'red'
+    fig.add_shape(type="line", x0=df_display.index[0], y0=current_price, x1=last_candle_time, y1=current_price,
+                  line=dict(color=current_price_color, width=1.5, dash="dot"), row=1, col=1)
+
+    # Format current price based on its value
+    if int(current_price) == 0:
+        price_text = f" {current_price} "
+    else:
+        price_text = f" {current_price:,.4f} "
+
+    fig.add_annotation(x=last_candle_time, y=current_price, text=price_text, showarrow=False,
+                       xanchor="left", xshift=5, font=dict(color="white", size=11), bgcolor=current_price_color,
+                       borderpad=2, row=1, col=1)
+
+    fig.update_layout(title_text=f'{time.strftime("%Y-%m-%d %H:%M:%S")}', template='plotly_white',
+                      xaxis_rangeslider_visible=False, dragmode='pan', legend_traceorder="reversed")
+    fig.update_yaxes(title_text="Price (USDT)", row=1, col=1)
     fig.update_yaxes(title_text="Volume", row=2, col=1)
-    fig.update_xaxes(showticklabels=False, row=1, col=1)
 
-    return fig
+    print(f"Finished drawing chart for {selected_symbol}.")
+    return fig, new_title
 
 
 if __name__ == '__main__':

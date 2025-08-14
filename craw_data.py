@@ -3,6 +3,20 @@
 import ccxt
 import pandas as pd
 
+def get_binance_usdt_pairs():
+    """
+    Lấy danh sách tất cả các cặp giao dịch Spot có đuôi /USDT trên Binance.
+    """
+    try:
+        binance = ccxt.binance()
+        binance.load_markets()
+        symbols = binance.symbols
+        usdt_pairs = [s for s in symbols if s.endswith('/USDT') and ':' not in s]
+        print(f"Đã tìm thấy {len(usdt_pairs)} cặp /USDT trên Binance.")
+        return sorted(usdt_pairs)
+    except Exception as e:
+        print(f"Lỗi khi lấy danh sách token: {e}")
+        return ['ETH/USDT', 'BTC/USDT']
 
 def fetch_ohlcv(exchange_name, symbol, timeframe, limit):
     """
