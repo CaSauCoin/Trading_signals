@@ -1,0 +1,25 @@
+# Giao diện của ứng dụng web
+app.layout = html.Div(
+    style={
+        'height': '100vh', # 100% chiều cao của cửa sổ trình duyệt
+        'display': 'flex',
+        'flexDirection': 'column',
+        'margin': '-8px' # Loại bỏ khoảng trắng mặc định của trình duyệt
+    },
+    children=[
+        html.H1(f'Dashboard Real-time cho {SYMBOL_TO_TRADE}', style={'textAlign': 'center', 'flex-shrink': '0'}),
+
+        # Component biểu đồ
+        dcc.Graph(
+            id='live-graph',
+            style={'flex-grow': '1'} # Cho phép biểu đồ co giãn để lấp đầy không gian
+        ),
+
+        # Component ẩn, dùng để kích hoạt cập nhật theo thời gian
+        dcc.Interval(
+            id='interval-component',
+            interval=UPDATE_INTERVAL_MS,
+            n_intervals=0
+        )
+    ]
+)
