@@ -4,13 +4,12 @@ from flask_cors import CORS
 from craw_data import get_binance_usdt_pairs, fetch_ohlcv, calculate_indicators
 
 app = Flask(__name__)
-CORS(app)  # Cho phép truy cập từ domain khác (Frontend)
+CORS(app) # Cho phép truy cập từ domain khác (Frontend)
 
 # --- CẤU HÌNH ---
 CANDLE_LIMIT_DISPLAY = 300
 CANDLE_LIMIT_CALC = 120
 EXCHANGE = 'binance'
-
 
 # --- API Endpoints ---
 
@@ -19,7 +18,6 @@ def get_tokens():
     """Cung cấp danh sách các token."""
     tokens = get_binance_usdt_pairs()
     return jsonify(tokens)
-
 
 @app.route('/api/chart-data', methods=['GET'])
 def get_chart_data():
@@ -35,15 +33,14 @@ def get_chart_data():
 
     # 2. Cắt dữ liệu để tính toán
     df_calc = df_display.tail(CANDLE_LIMIT_CALC).copy()
-
+    
     # 3. Tính toán tất cả chỉ báo và định dạng dữ liệu
     response_data = calculate_indicators(df_display, df_calc)
-
+    
     if not response_data:
         return jsonify({"error": "Không đủ dữ liệu để tính toán chỉ báo"}), 400
 
     return jsonify(response_data)
-
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
