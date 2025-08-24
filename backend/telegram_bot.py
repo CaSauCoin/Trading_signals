@@ -10,6 +10,9 @@ import time
 import signal
 import sys
 import re
+from datetime import datetime, timedelta
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
 # Cấu hình logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -21,13 +24,46 @@ class TradingBot:
         self.smc_analyzer = AdvancedSMC()
         self.application = None
         self.is_running = False
-        # State management cho custom input
+        # State management
         self.user_states = {}
         
+        # Watchlist storage - file-based persistence
+        self.watchlist_file = "user_watchlists.json"
+        self.user_watchlists = self.load_watchlists()
+        
+        # Scheduler for auto updates
+        self.scheduler = AsyncIOScheduler()
+        self.scheduler.add_job(
+            self.send_watchlist_updates,
+            IntervalTrigger(hours=1),
+            id='watchlist_updates',
+            max_instances=1
+        )
+        
+    def load_watchlists(self):
+        """Load watchlists from file"""
+        try:
+            if os.path.exists(self.watchlist_file):
+                with open(self.watchlist_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading watchlists: {e}")
+        return {}
+    
+    def save_watchlists(self):
+        """Save watchlists to file"""
+        try:
+            with open(self.watchlist_file, 'w', encoding='utf-8') as f:
+                json.dump(self.user_watchlists, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving watchlists: {e}")
+    
     def signal_handler(self, signum, frame):
         """Handle shutdown signals"""
         logger.info("Received shutdown signal, stopping bot...")
         self.is_running = False
+        if self.scheduler.running:
+            self.scheduler.shutdown()
         if self.application:
             asyncio.create_task(self.application.stop())
         sys.exit(0)
@@ -66,6 +102,7 @@ class TradingBot:
                 [InlineKeyboardButton("📈 Phân tích ETH/USDT", callback_data='analyze_ETH/USDT')],
                 [InlineKeyboardButton("🔍 Chọn cặp có sẵn", callback_data='select_pair')],
                 [InlineKeyboardButton("✏️ Nhập token tùy chỉnh", callback_data='custom_token')],
+                [InlineKeyboardButton("👁️ Danh sách theo dõi", callback_data='watchlist_menu')],
                 [InlineKeyboardButton("ℹ️ Hướng dẫn", callback_data='help')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -75,7 +112,9 @@ class TradingBot:
 
 Chọn một tùy chọn bên dưới để bắt đầu:
 
-💡 **Mới:** Bạn có thể nhập bất kỳ token nào trên Binance!
+💡 **Mới:** 
+• Nhập bất kỳ token nào trên Binance!
+• Theo dõi tự động với cập nhật mỗi giờ!
             """
             
             await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
@@ -90,6 +129,8 @@ Chọn một tùy chọn bên dưới để bắt đầu:
         
         if user_state.get("waiting_for") == "custom_token":
             await self.process_custom_token(update, context)
+        elif user_state.get("waiting_for") == "watchlist_token":
+            await self.process_watchlist_token(update, context)
         else:
             # Nếu không trong state đặc biệt, có thể là lệnh trực tiếp
             text = update.message.text.upper().strip()
@@ -105,6 +146,389 @@ Chọn một tùy chọn bên dưới để bắt đầu:
                     "Gửi /start để xem menu hoặc gửi tên token (VD: BTC hoặc BTC/USDT)"
                 )
 
+    # --- WATCHLIST FUNCTIONS ---
+    
+    async def show_watchlist_menu(self, query):
+        """Hiển thị menu watchlist"""
+        user_id = str(query.from_user.id)
+        user_watchlist = self.user_watchlists.get(user_id, [])
+        
+        keyboard = []
+        
+        if len(user_watchlist) < 5:
+            keyboard.append([InlineKeyboardButton("➕ Thêm token theo dõi", callback_data='add_to_watchlist')])
+        
+        if user_watchlist:
+            keyboard.append([InlineKeyboardButton("📋 Xem danh sách theo dõi", callback_data='view_watchlist')])
+            keyboard.append([InlineKeyboardButton("🗑️ Xóa token", callback_data='remove_from_watchlist')])
+            keyboard.append([InlineKeyboardButton("🔄 Cập nhật ngay", callback_data='update_watchlist_now')])
+        
+        keyboard.append([InlineKeyboardButton("🏠 Quay lại Menu", callback_data='start')])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        watchlist_info = f"**📊 DANH SÁCH THEO DÕI**\n\n"
+        watchlist_info += f"👁️ **Đang theo dõi:** {len(user_watchlist)}/5 tokens\n"
+        watchlist_info += f"⏱️ **Cập nhật:** Mỗi giờ tự động\n\n"
+        
+        if user_watchlist:
+            watchlist_info += "**Tokens đang theo dõi:**\n"
+            for i, item in enumerate(user_watchlist, 1):
+                watchlist_info += f"{i}. {item['symbol']} ({item['timeframe']})\n"
+        else:
+            watchlist_info += "📝 Chưa có token nào trong danh sách.\n"
+            watchlist_info += "Nhấn ➕ để thêm token đầu tiên!"
+        
+        await query.edit_message_text(watchlist_info, reply_markup=reply_markup, parse_mode='Markdown')
+
+    async def add_to_watchlist_step1(self, query):
+        """Bước 1: Nhập token để thêm vào watchlist"""
+        user_id = query.from_user.id
+        self.user_states[user_id] = {"waiting_for": "watchlist_token"}
+        
+        keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data='watchlist_menu')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        instruction_text = """
+➕ **THÊM TOKEN VÀO WATCHLIST**
+
+📝 **Nhập tên token:**
+• Chỉ tên token: `BTC`, `PEPE`, `DOGE`
+• Hoặc full pair: `BTC/USDT`, `PEPE/USDT`
+
+💡 **Ví dụ:**
+• `PEPE` → PEPE/USDT
+• `WLD/USDT` → WLD/USDT
+• `1000SATS` → 1000SATS/USDT
+
+⚠️ **Giới hạn:** Tối đa 5 tokens
+
+**Nhập tên token bây giờ:**
+        """
+        
+        await query.edit_message_text(
+            instruction_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    async def process_watchlist_token(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Xử lý token được nhập cho watchlist"""
+        user_id = str(update.effective_user.id)
+        token_input = update.message.text.upper().strip()
+        
+        # Reset state
+        self.user_states[int(user_id)] = {"waiting_for": None}
+        
+        # Validate và format token
+        if re.match(r'^[A-Z0-9]+$', token_input):
+            symbol = f"{token_input}/USDT"
+        elif re.match(r'^[A-Z0-9]+/USDT$', token_input):
+            symbol = token_input
+        else:
+            await update.message.reply_text(
+                "❌ **Format token không hợp lệ!**\n\n"
+                "✅ **Ví dụ hợp lệ:** BTC, PEPE, BTC/USDT\n\n"
+                "Vui lòng thử lại hoặc /start để quay về menu.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Kiểm tra giới hạn
+        user_watchlist = self.user_watchlists.get(user_id, [])
+        if len(user_watchlist) >= 5:
+            await update.message.reply_text(
+                "❌ **Đã đạt giới hạn!**\n\n"
+                "Bạn chỉ có thể theo dõi tối đa 5 tokens.\n"
+                "Xóa token cũ để thêm token mới.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Kiểm tra token đã có trong list chưa
+        if any(item['symbol'] == symbol for item in user_watchlist):
+            await update.message.reply_text(
+                f"⚠️ **Token {symbol} đã có trong danh sách!**\n\n"
+                "Chọn token khác hoặc /start để quay về menu.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Validate token trên Binance
+        if not await self.validate_binance_symbol(symbol):
+            await update.message.reply_text(
+                f"❌ **Token {symbol} không tồn tại trên Binance!**\n\n"
+                "Vui lòng kiểm tra lại tên token.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Hiển thị keyboard chọn timeframe
+        await self.add_to_watchlist_step2(update, symbol)
+
+    async def add_to_watchlist_step2(self, update, symbol):
+        """Bước 2: Chọn timeframe cho token"""
+        keyboard = [
+            [InlineKeyboardButton("📊 15m", callback_data=f'watchlist_add_{symbol.replace("/", "_")}_15m'),
+             InlineKeyboardButton("📊 1h", callback_data=f'watchlist_add_{symbol.replace("/", "_")}_1h'),
+             InlineKeyboardButton("📊 4h", callback_data=f'watchlist_add_{symbol.replace("/", "_")}_4h')],
+            [InlineKeyboardButton("📊 1d", callback_data=f'watchlist_add_{symbol.replace("/", "_")}_1d'),
+             InlineKeyboardButton("📊 3d", callback_data=f'watchlist_add_{symbol.replace("/", "_")}_3d'),
+             InlineKeyboardButton("📊 1w", callback_data=f'watchlist_add_{symbol.replace("/", "_")}_1w')],
+            [InlineKeyboardButton("🔙 Quay lại", callback_data='watchlist_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"✅ **Token {symbol} hợp lệ!**\n\n"
+            f"📊 **Chọn timeframe để theo dõi:**",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    async def finalize_add_to_watchlist(self, query, symbol, timeframe):
+        """Hoàn tất thêm token vào watchlist"""
+        user_id = str(query.from_user.id)
+        
+        # Initialize user watchlist if not exists
+        if user_id not in self.user_watchlists:
+            self.user_watchlists[user_id] = []
+        
+        # Add token
+        self.user_watchlists[user_id].append({
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'added_at': datetime.now().isoformat()
+        })
+        
+        # Save to file
+        self.save_watchlists()
+        
+        await query.edit_message_text(
+            f"✅ **Đã thêm thành công!**\n\n"
+            f"📊 **Token:** {symbol}\n"
+            f"⏱️ **Timeframe:** {timeframe}\n"
+            f"🔔 **Cập nhật:** Mỗi giờ tự động\n\n"
+            f"👁️ **Theo dõi:** {len(self.user_watchlists[user_id])}/5 tokens",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📋 Xem watchlist", callback_data='view_watchlist'),
+                InlineKeyboardButton("🏠 Menu", callback_data='start')
+            ]]),
+            parse_mode='Markdown'
+        )
+
+    async def view_watchlist(self, query):
+        """Xem danh sách theo dõi chi tiết"""
+        user_id = str(query.from_user.id)
+        user_watchlist = self.user_watchlists.get(user_id, [])
+        
+        if not user_watchlist:
+            await query.edit_message_text(
+                "📝 **Danh sách trống!**\n\n"
+                "Bạn chưa thêm token nào vào watchlist.\n"
+                "Nhấn ➕ để thêm token đầu tiên!",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("➕ Thêm token", callback_data='add_to_watchlist'),
+                    InlineKeyboardButton("🏠 Menu", callback_data='start')
+                ]]),
+                parse_mode='Markdown'
+            )
+            return
+        
+        message = "📋 **DANH SÁCH THEO DÕI**\n\n"
+        
+        for i, item in enumerate(user_watchlist, 1):
+            added_date = datetime.fromisoformat(item['added_at']).strftime('%d/%m/%Y')
+            message += f"{i}. **{item['symbol']}** ({item['timeframe']})\n"
+            message += f"   📅 Thêm: {added_date}\n\n"
+        
+        message += f"⏱️ **Cập nhật tiếp theo:** "
+        next_hour = datetime.now().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        message += next_hour.strftime('%H:%M')
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Cập nhật ngay", callback_data='update_watchlist_now')],
+            [InlineKeyboardButton("🗑️ Xóa token", callback_data='remove_from_watchlist'),
+             InlineKeyboardButton("➕ Thêm token", callback_data='add_to_watchlist')],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data='start')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+
+    async def remove_from_watchlist_menu(self, query):
+        """Menu xóa token khỏi watchlist"""
+        user_id = str(query.from_user.id)
+        user_watchlist = self.user_watchlists.get(user_id, [])
+        
+        if not user_watchlist:
+            await query.edit_message_text(
+                "📝 **Danh sách trống!**\n\nKhông có token nào để xóa.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🏠 Menu chính", callback_data='start')
+                ]]),
+                parse_mode='Markdown'
+            )
+            return
+        
+        keyboard = []
+        for i, item in enumerate(user_watchlist):
+            callback_data = f"watchlist_remove_{i}_{item['symbol'].replace('/', '_')}_{item['timeframe']}"
+            keyboard.append([InlineKeyboardButton(
+                f"🗑️ {item['symbol']} ({item['timeframe']})",
+                callback_data=callback_data
+            )])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Quay lại", callback_data='watchlist_menu')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🗑️ **CHỌN TOKEN ĐỂ XÓA**\n\n"
+            "Nhấn vào token bạn muốn xóa khỏi danh sách theo dõi:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    async def remove_from_watchlist(self, query, index, symbol, timeframe):
+        """Xóa token khỏi watchlist"""
+        user_id = str(query.from_user.id)
+        
+        try:
+            index = int(index)
+            if user_id in self.user_watchlists and 0 <= index < len(self.user_watchlists[user_id]):
+                removed_item = self.user_watchlists[user_id].pop(index)
+                self.save_watchlists()
+                
+                await query.edit_message_text(
+                    f"✅ **Đã xóa thành công!**\n\n"
+                    f"🗑️ **Token:** {removed_item['symbol']}\n"
+                    f"⏱️ **Timeframe:** {removed_item['timeframe']}\n\n"
+                    f"👁️ **Còn lại:** {len(self.user_watchlists[user_id])}/5 tokens",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("📋 Xem watchlist", callback_data='view_watchlist'),
+                        InlineKeyboardButton("🏠 Menu", callback_data='start')
+                    ]]),
+                    parse_mode='Markdown'
+                )
+            else:
+                raise IndexError("Invalid index")
+        except Exception as e:
+            logger.error(f"Error removing from watchlist: {e}")
+            await query.edit_message_text(
+                "❌ **Lỗi khi xóa token!**\n\nVui lòng thử lại.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Quay lại", callback_data='watchlist_menu')
+                ]]),
+                parse_mode='Markdown'
+            )
+
+    async def update_watchlist_now(self, query):
+        """Cập nhật watchlist ngay lập tức"""
+        user_id = str(query.from_user.id)
+        
+        await query.edit_message_text("🔄 **Đang cập nhật watchlist...**")
+        
+        # Gửi update cho user này
+        await self.send_watchlist_update_for_user(user_id)
+        
+        await query.edit_message_text(
+            "✅ **Cập nhật hoàn tất!**\n\n"
+            "📊 Đã gửi báo cáo phân tích mới nhất.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📋 Xem watchlist", callback_data='view_watchlist'),
+                InlineKeyboardButton("🏠 Menu", callback_data='start')
+            ]]),
+            parse_mode='Markdown'
+        )
+
+    async def send_watchlist_updates(self):
+        """Gửi cập nhật watchlist cho tất cả users (chạy mỗi giờ)"""
+        if not self.application:
+            return
+            
+        logger.info("Starting scheduled watchlist updates...")
+        
+        for user_id in self.user_watchlists:
+            try:
+                await self.send_watchlist_update_for_user(user_id)
+                await asyncio.sleep(1)  # Tránh spam
+            except Exception as e:
+                logger.error(f"Error sending update to user {user_id}: {e}")
+        
+        logger.info("Completed scheduled watchlist updates")
+
+    async def send_watchlist_update_for_user(self, user_id):
+        """Gửi cập nhật watchlist cho 1 user cụ thể"""
+        user_watchlist = self.user_watchlists.get(user_id, [])
+        
+        if not user_watchlist:
+            return
+        
+        try:
+            message = f"🔔 **WATCHLIST UPDATE** - {datetime.now().strftime('%H:%M %d/%m/%Y')}\n\n"
+            
+            for i, item in enumerate(user_watchlist, 1):
+                try:
+                    # Lấy phân tích cho từng token
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self.smc_analyzer.get_trading_signals,
+                            item['symbol'],
+                            item['timeframe']
+                        ),
+                        timeout=15.0
+                    )
+                    
+                    if result:
+                        message += f"**{i}. {item['symbol']} ({item['timeframe']})**\n"
+                        message += f"💰 Giá: ${result['current_price']:,.2f}\n"
+                        
+                        # Price change
+                        price_change = result['indicators'].get('price_change_pct', 0)
+                        change_emoji = "📈" if price_change > 0 else "📉"
+                        message += f"{change_emoji} Thay đổi: {price_change:+.2f}%\n"
+                        
+                        # RSI
+                        rsi = result['indicators'].get('rsi', 50)
+                        rsi_emoji = "🟢" if rsi < 30 else ("🔴" if rsi > 70 else "🟡")
+                        message += f"📊 RSI: {rsi_emoji} {rsi:.1f}\n"
+                        
+                        # Latest signals
+                        trading_signals = result.get('trading_signals', {})
+                        entry_long = trading_signals.get('entry_long', [])
+                        entry_short = trading_signals.get('entry_short', [])
+                        
+                        if entry_long:
+                            message += f"🟢 Long Signal: ${entry_long[-1]['price']:,.2f}\n"
+                        elif entry_short:
+                            message += f"🔴 Short Signal: ${entry_short[-1]['price']:,.2f}\n"
+                        else:
+                            message += f"⏸️ Không có signal\n"
+                        
+                        message += "\n"
+                    else:
+                        message += f"**{i}. {item['symbol']} ({item['timeframe']})**\n"
+                        message += f"❌ Không thể lấy dữ liệu\n\n"
+                        
+                except Exception as e:
+                    logger.error(f"Error analyzing {item['symbol']}: {e}")
+                    message += f"**{i}. {item['symbol']} ({item['timeframe']})**\n"
+                    message += f"⚠️ Lỗi phân tích\n\n"
+            
+            message += f"⏰ Cập nhật tiếp theo: {(datetime.now() + timedelta(hours=1)).strftime('%H:%M')}"
+            
+            # Gửi message
+            await self.application.bot.send_message(
+                chat_id=int(user_id),
+                text=message,
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"Error sending watchlist update to user {user_id}: {e}")
+
+    # --- EXISTING FUNCTIONS (giữ nguyên) ---
+    
     async def process_custom_token(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Xử lý token tùy chỉnh được nhập"""
         user_id = update.effective_user.id
@@ -206,7 +630,7 @@ Chọn một tùy chọn bên dưới để bắt đầu:
         return suggestions[:10]
     
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler cho các nút inline với error handling"""
+        """Handler cho các nút inline với watchlist support"""
         query = update.callback_query
         user_id = update.effective_user.id
         
@@ -216,7 +640,33 @@ Chọn một tùy chọn bên dưới để bắt đầu:
             # Reset user state khi click button
             self.user_states[user_id] = {"waiting_for": None}
             
-            if query.data.startswith('analyze_'):
+            # Watchlist handlers
+            if query.data == 'watchlist_menu':
+                await self.show_watchlist_menu(query)
+            elif query.data == 'add_to_watchlist':
+                await self.add_to_watchlist_step1(query)
+            elif query.data == 'view_watchlist':
+                await self.view_watchlist(query)
+            elif query.data == 'remove_from_watchlist':
+                await self.remove_from_watchlist_menu(query)
+            elif query.data == 'update_watchlist_now':
+                await self.update_watchlist_now(query)
+            elif query.data.startswith('watchlist_add_'):
+                # watchlist_add_BTC_USDT_4h
+                parts = query.data.replace('watchlist_add_', '').split('_')
+                symbol = '_'.join(parts[:-1]).replace('_', '/')
+                timeframe = parts[-1]
+                await self.finalize_add_to_watchlist(query, symbol, timeframe)
+            elif query.data.startswith('watchlist_remove_'):
+                # watchlist_remove_0_BTC_USDT_4h
+                parts = query.data.replace('watchlist_remove_', '').split('_')
+                index = parts[0]
+                symbol = '_'.join(parts[1:-1]).replace('_', '/')
+                timeframe = parts[-1]
+                await self.remove_from_watchlist(query, index, symbol, timeframe)
+            
+            # Existing handlers
+            elif query.data.startswith('analyze_'):
                 symbol = query.data.replace('analyze_', '')
                 await self.send_analysis(query, symbol, '4h')
             elif query.data == 'select_pair':
@@ -527,6 +977,7 @@ Chọn một tùy chọn bên dưới để bắt đầu:
             [InlineKeyboardButton("📈 Phân tích ETH/USDT", callback_data='analyze_ETH/USDT')],
             [InlineKeyboardButton("🔍 Chọn cặp có sẵn", callback_data='select_pair')],
             [InlineKeyboardButton("✏️ Nhập token tùy chỉnh", callback_data='custom_token')],
+            [InlineKeyboardButton("👁️ Danh sách theo dõi", callback_data='watchlist_menu')],
             [InlineKeyboardButton("ℹ️ Hướng dẫn", callback_data='help')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -631,13 +1082,13 @@ Chọn cặp để phân tích:
             await update.message.reply_text("Cách sử dụng: /analysis BTC/USDT 4h")
     
     def run(self):
-        """Chạy bot với error handling và graceful shutdown"""
+        """Chạy bot với scheduler"""
         # Setup signal handlers
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         
         try:
-            # Tạo application với retry settings
+            # Tạo application
             self.application = Application.builder()\
                 .token(self.token)\
                 .read_timeout(30)\
@@ -646,21 +1097,21 @@ Chọn cặp để phân tích:
                 .pool_timeout(30)\
                 .build()
             
-            # Add error handler
+            # Add handlers
             self.application.add_error_handler(self.error_handler)
-            
-            # Thêm handlers
             self.application.add_handler(CommandHandler("start", self.start_command))
             self.application.add_handler(CommandHandler("analysis", self.analysis_command))
             self.application.add_handler(CallbackQueryHandler(self.button_handler))
-            # THÊM TEXT HANDLER
             self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_handler))
             
-            self.is_running = True
+            # Start scheduler
+            self.scheduler.start()
+            logger.info("📅 Scheduler started - Watchlist updates every hour")
             
-            # Chạy bot với retry logic
+            self.is_running = True
             logger.info("🤖 Bot đang khởi động...")
             
+            # Run bot
             while self.is_running:
                 try:
                     self.application.run_polling(
@@ -674,15 +1125,12 @@ Chọn cặp để phân tích:
                     )
                 except Conflict as e:
                     logger.error(f"Bot conflict: {e}")
-                    logger.info("Waiting 30 seconds before retry...")
                     time.sleep(30)
                 except (TimedOut, NetworkError) as e:
                     logger.error(f"Network error: {e}")
-                    logger.info("Waiting 10 seconds before retry...")
                     time.sleep(10)
                 except Exception as e:
                     logger.error(f"Unexpected error: {e}")
-                    logger.info("Waiting 15 seconds before retry...")
                     time.sleep(15)
                     
         except KeyboardInterrupt:
@@ -691,6 +1139,8 @@ Chọn cặp để phân tích:
             logger.error(f"Fatal error: {e}")
         finally:
             self.is_running = False
+            if self.scheduler.running:
+                self.scheduler.shutdown()
             if self.application:
                 try:
                     asyncio.run(self.application.stop())
@@ -699,9 +1149,6 @@ Chọn cặp để phân tích:
             logger.info("Bot shutdown complete")
 
 if __name__ == "__main__":
-    # Kiểm tra token
     BOT_TOKEN = "7858582538:AAG4gosdOgbe7RsNb9nnYOMQJTohNSGcn6k"
-    
-    # Khởi động bot
     bot = TradingBot(BOT_TOKEN)
     bot.run()
