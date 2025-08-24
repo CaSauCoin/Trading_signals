@@ -4,26 +4,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trading Dashboard</title>
-    <link rel="stylesheet" href="./css/style.css">
-    <script defer src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
-    <script defer src="./js/main.js"></script>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://unpkg.com/lightweight-charts@4.0.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
+    <h1 id="main-title">Dashboard Real-time</h1>
+
+    <div class="controls">
+        <select id="exchange-selector"></select>
+        <select id="token-selector"></select>
+        <div id="timeframe-selector">
+            </div>
+    </div>
+
     <div id="chart-container">
         <div id="loading-spinner" class="hidden">
             <div class="spinner"></div>
         </div>
     </div>
 
-    <h1 id="main-title">Dashboard Real-time</h1>
-    
-    <div class="controls">
-        <select id="token-selector"></select>
-        <div id="timeframe-selector">
-            <button class="timeframe-btn" data-value="1h">1H</button>
-            <button class="timeframe-btn active" data-value="4h">4H</button>
-            <button class="timeframe-btn" data-value="1d">1D</button>
-        </div>
-    </div>
+    <script src="js/main.js"></script>
 </body>
 </html>
