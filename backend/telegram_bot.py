@@ -524,7 +524,7 @@ Chọn cặp để phân tích:
 
 if __name__ == "__main__":
     # Kiểm tra token
-    BOT_TOKEN = "7875623912:AAF1aw7227NEDWgKUWC0va9dhSbvbsCMj0c"
+    BOT_TOKEN = "7858582538:AAG4gosdOgbe7RsNb9nnYOMQJTohNSGcn6k"
     
     # Khởi động bot
     bot = TradingBot(BOT_TOKEN)
