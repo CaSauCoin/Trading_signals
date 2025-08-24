@@ -526,24 +526,6 @@ if __name__ == "__main__":
     # Kiểm tra token
     BOT_TOKEN = "7875623912:AAF1aw7227NEDWgKUWC0va9dhSbvbsCMj0c"
     
-    if not BOT_TOKEN or BOT_TOKEN == "BOT_TOKEN":
-        print("❌ Vui lòng cập nhật BOT_TOKEN")
-        sys.exit(1)
-    
-    # Kiểm tra process đang chạy
-    import psutil
-    current_pid = os.getpid()
-    
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-        try:
-            if proc.info['pid'] != current_pid and 'telegram_bot.py' in ' '.join(proc.info['cmdline'] or []):
-                print(f"❌ Phát hiện bot instance khác đang chạy (PID: {proc.info['pid']})")
-                print("Stopping existing instance...")
-                proc.terminate()
-                time.sleep(3)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-    
     # Khởi động bot
     bot = TradingBot(BOT_TOKEN)
     bot.run()
