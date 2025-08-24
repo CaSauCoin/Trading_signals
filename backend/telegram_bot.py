@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.error import Conflict, TimedOut, NetworkError
 from AdvancedSMC import AdvancedSMC
 import json
@@ -9,6 +9,7 @@ import os
 import time
 import signal
 import sys
+import re
 
 # Cấu hình logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -20,6 +21,8 @@ class TradingBot:
         self.smc_analyzer = AdvancedSMC()
         self.application = None
         self.is_running = False
+        # State management cho custom input
+        self.user_states = {}
         
     def signal_handler(self, signum, frame):
         """Handle shutdown signals"""
@@ -36,7 +39,7 @@ class TradingBot:
         # Handle specific errors
         if isinstance(context.error, Conflict):
             logger.error("Bot conflict detected - another instance might be running")
-            await asyncio.sleep(10)  # Wait before retrying
+            await asyncio.sleep(10)
         elif isinstance(context.error, (TimedOut, NetworkError)):
             logger.error("Network error, retrying...")
             await asyncio.sleep(5)
@@ -54,10 +57,15 @@ class TradingBot:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler cho command /start"""
         try:
+            # Reset user state
+            user_id = update.effective_user.id
+            self.user_states[user_id] = {"waiting_for": None}
+            
             keyboard = [
                 [InlineKeyboardButton("📊 Phân tích BTC/USDT", callback_data='analyze_BTC/USDT')],
                 [InlineKeyboardButton("📈 Phân tích ETH/USDT", callback_data='analyze_ETH/USDT')],
-                [InlineKeyboardButton("🔍 Chọn cặp khác", callback_data='select_pair')],
+                [InlineKeyboardButton("🔍 Chọn cặp có sẵn", callback_data='select_pair')],
+                [InlineKeyboardButton("✏️ Nhập token tùy chỉnh", callback_data='custom_token')],
                 [InlineKeyboardButton("ℹ️ Hướng dẫn", callback_data='help')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -66,25 +74,155 @@ class TradingBot:
 🚀 **Trading Bot SMC!**
 
 Chọn một tùy chọn bên dưới để bắt đầu:
+
+💡 **Mới:** Bạn có thể nhập bất kỳ token nào trên Binance!
             """
             
             await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Error in start_command: {e}")
             await update.message.reply_text("❌ Có lỗi xảy ra. Vui lòng thử lại /start")
+
+    async def text_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handler cho tin nhắn text - xử lý custom token input"""
+        user_id = update.effective_user.id
+        user_state = self.user_states.get(user_id, {})
+        
+        if user_state.get("waiting_for") == "custom_token":
+            await self.process_custom_token(update, context)
+        else:
+            # Nếu không trong state đặc biệt, có thể là lệnh trực tiếp
+            text = update.message.text.upper().strip()
+            
+            # Kiểm tra format TOKEN/USDT hoặc TOKEN
+            if re.match(r'^[A-Z0-9]+(/USDT)?$', text):
+                if not text.endswith('/USDT'):
+                    text += '/USDT'
+                await self.analyze_custom_token(update, text)
+            else:
+                await update.message.reply_text(
+                    "❓ Tôi không hiểu lệnh này.\n"
+                    "Gửi /start để xem menu hoặc gửi tên token (VD: BTC hoặc BTC/USDT)"
+                )
+
+    async def process_custom_token(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Xử lý token tùy chỉnh được nhập"""
+        user_id = update.effective_user.id
+        token_input = update.message.text.upper().strip()
+        
+        # Reset state
+        self.user_states[user_id] = {"waiting_for": None}
+        
+        # Validate và format token
+        if re.match(r'^[A-Z0-9]+$', token_input):
+            symbol = f"{token_input}/USDT"
+        elif re.match(r'^[A-Z0-9]+/USDT$', token_input):
+            symbol = token_input
+        else:
+            await update.message.reply_text(
+                "❌ **Format token không hợp lệ!**\n\n"
+                "✅ **Ví dụ hợp lệ:**\n"
+                "• BTC\n"
+                "• BTC/USDT\n"
+                "• PEPE\n"
+                "• DOGE/USDT\n\n"
+                "Vui lòng thử lại hoặc /start để quay về menu.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        await self.analyze_custom_token(update, symbol)
+
+    async def analyze_custom_token(self, update, symbol):
+        """Phân tích token tùy chỉnh"""
+        # Kiểm tra xem symbol có tồn tại trên Binance không
+        if not await self.validate_binance_symbol(symbol):
+            suggestions = await self.get_similar_tokens(symbol)
+            error_msg = f"❌ **Token {symbol} không tồn tại trên Binance!**\n\n"
+            
+            if suggestions:
+                error_msg += "💡 **Có thể bạn muốn tìm:**\n"
+                for suggestion in suggestions[:5]:
+                    error_msg += f"• {suggestion}\n"
+                error_msg += "\n📝 Nhập chính xác tên token hoặc /start để quay về menu."
+            else:
+                error_msg += "📝 Vui lòng kiểm tra lại tên token hoặc /start để quay về menu."
+            
+            await update.message.reply_text(error_msg, parse_mode='Markdown')
+            return
+        
+        # Hiển thị keyboard timeframes cho token hợp lệ
+        keyboard = [
+            [InlineKeyboardButton("📊 15m", callback_data=f'tf_{symbol.replace("/", "_")}_15m'),
+             InlineKeyboardButton("📊 1h", callback_data=f'tf_{symbol.replace("/", "_")}_1h'),
+             InlineKeyboardButton("📊 4h", callback_data=f'tf_{symbol.replace("/", "_")}_4h')],
+            [InlineKeyboardButton("📊 1d", callback_data=f'tf_{symbol.replace("/", "_")}_1d'),
+             InlineKeyboardButton("📊 3d", callback_data=f'tf_{symbol.replace("/", "_")}_3d'),
+             InlineKeyboardButton("📊 1w", callback_data=f'tf_{symbol.replace("/", "_")}_1w')],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data='start')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"✅ **Token {symbol} hợp lệ!**\n\n"
+            f"📊 Chọn timeframe để phân tích:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    async def validate_binance_symbol(self, symbol):
+        """Kiểm tra symbol có tồn tại trên Binance không"""
+        try:
+            # Sử dụng SMC analyzer để kiểm tra
+            test_result = await asyncio.wait_for(
+                asyncio.to_thread(self.smc_analyzer.get_trading_signals, symbol, '1h'),
+                timeout=10.0
+            )
+            return test_result is not None
+        except Exception as e:
+            logger.error(f"Error validating symbol {symbol}: {e}")
+            return False
+
+    async def get_similar_tokens(self, symbol):
+        """Tìm các token tương tự"""
+        common_tokens = [
+            'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT', 'XRP/USDT',
+            'DOGE/USDT', 'AVAX/USDT', 'DOT/USDT', 'LTC/USDT', 'LINK/USDT', 'UNI/USDT',
+            'ATOM/USDT', 'MATIC/USDT', 'FTT/USDT', 'NEAR/USDT', 'ALGO/USDT', 'VET/USDT',
+            'TRX/USDT', 'FIL/USDT', 'MANA/USDT', 'SAND/USDT', 'CRV/USDT', 'SUSHI/USDT',
+            'COMP/USDT', 'MKR/USDT', 'AAVE/USDT', 'SNX/USDT', 'YFI/USDT', 'BAL/USDT',
+            'PEPE/USDT', 'SHIB/USDT', 'WLD/USDT', 'SEI/USDT', 'SUI/USDT', 'ARB/USDT',
+            'OP/USDT', 'APT/USDT', 'STX/USDT', 'INJ/USDT', 'TIA/USDT', 'JUP/USDT'
+        ]
+        
+        # Tìm tokens có chứa từ khóa
+        token_base = symbol.replace('/USDT', '').upper()
+        suggestions = []
+        
+        for token in common_tokens:
+            if token_base in token or any(char in token_base for char in token.replace('/USDT', '')):
+                suggestions.append(token)
+        
+        return suggestions[:10]
     
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler cho các nút inline với error handling"""
         query = update.callback_query
+        user_id = update.effective_user.id
         
         try:
             await query.answer()
+            
+            # Reset user state khi click button
+            self.user_states[user_id] = {"waiting_for": None}
             
             if query.data.startswith('analyze_'):
                 symbol = query.data.replace('analyze_', '')
                 await self.send_analysis(query, symbol, '4h')
             elif query.data == 'select_pair':
                 await self.show_pair_selection(query)
+            elif query.data == 'custom_token':
+                await self.show_custom_token_input(query)
             elif query.data == 'help':
                 await self.show_help(query)
             elif query.data == 'start':
@@ -106,6 +244,39 @@ Chọn một tùy chọn bên dưới để bắt đầu:
             except:
                 pass
 
+    async def show_custom_token_input(self, query):
+        """Hiển thị hướng dẫn nhập token tùy chỉnh"""
+        user_id = query.from_user.id
+        self.user_states[user_id] = {"waiting_for": "custom_token"}
+        
+        keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data='start')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        instruction_text = """
+✏️ **NHẬP TOKEN TÙY CHỈNH**
+
+📝 **Cách nhập:**
+• Chỉ tên token: `BTC`, `PEPE`, `DOGE`
+• Hoặc full pair: `BTC/USDT`, `PEPE/USDT`
+
+💡 **Ví dụ:**
+• `PEPE` → sẽ phân tích PEPE/USDT
+• `WLD/USDT` → sẽ phân tích WLD/USDT
+• `1000SATS` → sẽ phân tích 1000SATS/USDT
+
+⚠️ **Lưu ý:**
+• Chỉ hỗ trợ tokens trên Binance
+• Chỉ pair với USDT
+
+**Nhập tên token bây giờ:**
+        """
+        
+        await query.edit_message_text(
+            instruction_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
     async def send_analysis(self, query, symbol, timeframe='4h'):
         """Gửi phân tích SMC với error handling improved"""
         try:
@@ -118,7 +289,11 @@ Chọn một tùy chọn bên dưới để bắt đầu:
             )
             
             if result is None:
-                await query.edit_message_text("❌ Không thể lấy dữ liệu. Vui lòng thử lại sau.")
+                await query.edit_message_text(
+                    f"❌ Không thể lấy dữ liệu cho {symbol}.\n"
+                    f"Token có thể không tồn tại trên Binance hoặc không có đủ dữ liệu.\n\n"
+                    f"Vui lòng thử token khác hoặc /start để quay về menu."
+                )
                 return
             
             # Format message
@@ -134,6 +309,7 @@ Chọn một tùy chọn bên dưới để bắt đầu:
                  InlineKeyboardButton("📊 3d", callback_data=f'tf_{symbol_encoded}_3d'),
                  InlineKeyboardButton("📊 1w", callback_data=f'tf_{symbol_encoded}_1w')],
                 [InlineKeyboardButton("🔄 Refresh", callback_data=f'tf_{symbol_encoded}_{timeframe}'),
+                 InlineKeyboardButton("✏️ Token khác", callback_data='custom_token'),
                  InlineKeyboardButton("🏠 Menu", callback_data='start')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -349,7 +525,8 @@ Chọn một tùy chọn bên dưới để bắt đầu:
         keyboard = [
             [InlineKeyboardButton("📊 Phân tích BTC/USDT", callback_data='analyze_BTC/USDT')],
             [InlineKeyboardButton("📈 Phân tích ETH/USDT", callback_data='analyze_ETH/USDT')],
-            [InlineKeyboardButton("🔍 Chọn cặp khác", callback_data='select_pair')],
+            [InlineKeyboardButton("🔍 Chọn cặp có sẵn", callback_data='select_pair')],
+            [InlineKeyboardButton("✏️ Nhập token tùy chỉnh", callback_data='custom_token')],
             [InlineKeyboardButton("ℹ️ Hướng dẫn", callback_data='help')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -460,9 +637,6 @@ Chọn cặp để phân tích:
         signal.signal(signal.SIGTERM, self.signal_handler)
         
         try:
-            # Stop any existing bot instances
-            logger.info("Stopping any existing bot instances...")
-            
             # Tạo application với retry settings
             self.application = Application.builder()\
                 .token(self.token)\
@@ -479,6 +653,8 @@ Chọn cặp để phân tích:
             self.application.add_handler(CommandHandler("start", self.start_command))
             self.application.add_handler(CommandHandler("analysis", self.analysis_command))
             self.application.add_handler(CallbackQueryHandler(self.button_handler))
+            # THÊM TEXT HANDLER
+            self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text_handler))
             
             self.is_running = True
             
