@@ -193,3 +193,4 @@ if __name__ == "__main__":
         print(f"Last price: {df['close'].iloc[-1]}")
     else:
         print("Failed to fetch data")
+        
