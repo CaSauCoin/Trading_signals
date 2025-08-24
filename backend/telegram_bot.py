@@ -4,6 +4,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from AdvancedSMC import AdvancedSMC
 import json
+import os
+import time
 
 # Cấu hình logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -26,9 +28,7 @@ class TradingBot:
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         welcome_text = """
-🚀 **Chào mừng đến với Trading Bot SMC!**
-
-Bot này sử dụng Smart Money Concepts để phân tích thị trường crypto.
+🚀 **Trading Bot SMC!**
 
 **Các tính năng:**
 • 📊 Phân tích Order Blocks
@@ -123,7 +123,9 @@ Chọn một tùy chọn bên dưới để bắt đầu:
         smc = result['smc_analysis']
         indicators = result['indicators']
         trading_signals = result.get('trading_signals', {})
-        
+        # entry = result.get('entry', None)
+        # exit = result.get('exit', None)
+
         # Header
         message = f"📊 *Phân tích {result['symbol']} - {result['timeframe']}*\n\n"
         
@@ -134,8 +136,8 @@ Chọn một tùy chọn bên dưới để bắt đầu:
         rsi = indicators.get('rsi', 50)
         rsi_emoji = "🟢" if rsi < 30 else ("🔴" if rsi > 70 else "🟡")
         message += f"📈 *RSI:* {rsi_emoji} {rsi:.1f}\n"
-        message += f"📊 *SMA 20:* ${indicators.get('sma_20', 0):,.2f}\n"
-        message += f"📉 *EMA 20:* ${indicators.get('ema_20', 0):,.2f}\n\n"
+        message += f"📊 *Giá sát:* ${indicators.get('sma_20', 0):,.2f}\n"
+        message += f"📉 *Giá dự tốt:* ${indicators.get('ema_20', 0):,.2f}\n\n"
         
         # Price change
         price_change = indicators.get('price_change_pct', 0)
@@ -282,7 +284,7 @@ Chọn một tùy chọn bên dưới để bắt đầu:
             if smc.get('fair_value_gaps'):
                 fvg_count = len([fvg for fvg in smc['fair_value_gaps'] if not fvg.get('filled', True)])
                 if fvg_count > 2:
-                    suggestions.append(f"🎯 {fvg_count} FVG chưa fill - Chờ retest")
+                    suggestions.append(f"🎯 FVG chưa fill - Chờ retest")
             
             # Trading signals
             if trading_signals:
@@ -334,12 +336,15 @@ Chọn cặp để phân tích:
             [InlineKeyboardButton("₿ BTC/USDT", callback_data='pair_BTC/USDT'),
              InlineKeyboardButton("Ξ ETH/USDT", callback_data='pair_ETH/USDT')],
             [InlineKeyboardButton("🟡 BNB/USDT", callback_data='pair_BNB/USDT'),
-             InlineKeyboardButton("🔵 ADA/USDT", callback_data='pair_ADA/USDT')],
+             InlineKeyboardButton("🔵 WLD/USDT", callback_data='pair_WLD/USDT')],
             [InlineKeyboardButton("🟣 SOL/USDT", callback_data='pair_SOL/USDT'),
-             InlineKeyboardButton("🔴 DOT/USDT", callback_data='pair_DOT/USDT')],
-            [InlineKeyboardButton("🟠 AVAX/USDT", callback_data='pair_AVAX/USDT'),
-             InlineKeyboardButton("🟢 MATIC/USDT", callback_data='pair_MATIC/USDT')],
-            [InlineKeyboardButton("🏠 Quay lại", callback_data='start')]
+             InlineKeyboardButton("🔴 SEI/USDT", callback_data='pair_SEI/USDT')],
+            [InlineKeyboardButton("🟠 BNB/USDT", callback_data='pair_BNB/USDT'),
+             InlineKeyboardButton("🟢 AGT/USDT", callback_data='pair_AGT/USDT')],
+            [InlineKeyboardButton("🟢 PEPE/USDT ", callback_data='pair_PEPE/USDT'),
+             InlineKeyboardButton("🟢 SUI/USDT", callback_data='pair_SUI/USDT')],
+            [InlineKeyboardButton("🏠 Quay lại", callback_data='start')],
+
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
