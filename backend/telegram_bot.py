@@ -2,10 +2,13 @@ import asyncio
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.error import Conflict, TimedOut, NetworkError
 from AdvancedSMC import AdvancedSMC
 import json
 import os
 import time
+import signal
+import sys
 
 # Cấu hình logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -16,74 +19,113 @@ class TradingBot:
         self.token = token
         self.smc_analyzer = AdvancedSMC()
         self.application = None
+        self.is_running = False
         
+    def signal_handler(self, signum, frame):
+        """Handle shutdown signals"""
+        logger.info("Received shutdown signal, stopping bot...")
+        self.is_running = False
+        if self.application:
+            asyncio.create_task(self.application.stop())
+        sys.exit(0)
+        
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle errors globally"""
+        logger.error(f"Exception while handling an update: {context.error}")
+        
+        # Handle specific errors
+        if isinstance(context.error, Conflict):
+            logger.error("Bot conflict detected - another instance might be running")
+            await asyncio.sleep(10)  # Wait before retrying
+        elif isinstance(context.error, (TimedOut, NetworkError)):
+            logger.error("Network error, retrying...")
+            await asyncio.sleep(5)
+        
+        # Try to inform user about the error
+        if update and hasattr(update, 'effective_chat') and update.effective_chat:
+            try:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="⚠️ Đã xảy ra lỗi. Vui lòng thử lại sau."
+                )
+            except Exception as e:
+                logger.error(f"Could not send error message to user: {e}")
+
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler cho command /start"""
-        keyboard = [
-            [InlineKeyboardButton("📊 Phân tích BTC/USDT", callback_data='analyze_BTC/USDT')],
-            [InlineKeyboardButton("📈 Phân tích ETH/USDT", callback_data='analyze_ETH/USDT')],
-            [InlineKeyboardButton("🔍 Chọn cặp khác", callback_data='select_pair')],
-            [InlineKeyboardButton("ℹ️ Hướng dẫn", callback_data='help')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        welcome_text = """
+        try:
+            keyboard = [
+                [InlineKeyboardButton("📊 Phân tích BTC/USDT", callback_data='analyze_BTC/USDT')],
+                [InlineKeyboardButton("📈 Phân tích ETH/USDT", callback_data='analyze_ETH/USDT')],
+                [InlineKeyboardButton("🔍 Chọn cặp khác", callback_data='select_pair')],
+                [InlineKeyboardButton("ℹ️ Hướng dẫn", callback_data='help')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            welcome_text = """
 🚀 **Trading Bot SMC!**
 
 Chọn một tùy chọn bên dưới để bắt đầu:
-        """
-        
-        await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+            """
+            
+            await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error in start_command: {e}")
+            await update.message.reply_text("❌ Có lỗi xảy ra. Vui lòng thử lại /start")
     
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler cho các nút inline"""
+        """Handler cho các nút inline với error handling"""
         query = update.callback_query
-        await query.answer()
-        
-        if query.data.startswith('analyze_'):
-            symbol = query.data.replace('analyze_', '')
-            await self.send_analysis(query, symbol, '4h')  # Default timeframe
-        elif query.data == 'select_pair':
-            await self.show_pair_selection(query)
-        elif query.data == 'help':
-            await self.show_help(query)
-        elif query.data == 'start':
-            await self.show_main_menu(query)
-        elif query.data.startswith('pair_'):
-            symbol = query.data.replace('pair_', '')
-            await self.send_analysis(query, symbol, '4h')
-        elif query.data.startswith('tf_'):
-            # Xử lý timeframe: tf_SYMBOL_TIMEFRAME
-            parts = query.data.replace('tf_', '').split('_')
-            if len(parts) >= 2:
-                symbol = '_'.join(parts[:-1])  # Ghép lại symbol (có thể chứa dấu /)
-                symbol = symbol.replace('_', '/')  # Convert back to BTC/USDT format
-                timeframe = parts[-1]
-                await self.send_analysis(query, symbol, timeframe)
-
-    async def send_analysis(self, query, symbol, timeframe='4h'):
-        """Gửi phân tích SMC cho symbol với timeframe cụ thể"""
-        await query.edit_message_text("🔄 Đang phân tích... Vui lòng đợi...")
         
         try:
-            # Lấy phân tích từ SMC
-            result = self.smc_analyzer.get_trading_signals(symbol, timeframe)
+            await query.answer()
+            
+            if query.data.startswith('analyze_'):
+                symbol = query.data.replace('analyze_', '')
+                await self.send_analysis(query, symbol, '4h')
+            elif query.data == 'select_pair':
+                await self.show_pair_selection(query)
+            elif query.data == 'help':
+                await self.show_help(query)
+            elif query.data == 'start':
+                await self.show_main_menu(query)
+            elif query.data.startswith('pair_'):
+                symbol = query.data.replace('pair_', '')
+                await self.send_analysis(query, symbol, '4h')
+            elif query.data.startswith('tf_'):
+                parts = query.data.replace('tf_', '').split('_')
+                if len(parts) >= 2:
+                    symbol = '_'.join(parts[:-1]).replace('_', '/')
+                    timeframe = parts[-1]
+                    await self.send_analysis(query, symbol, timeframe)
+                    
+        except Exception as e:
+            logger.error(f"Error in button_handler: {e}")
+            try:
+                await query.edit_message_text("❌ Có lỗi xảy ra. Vui lòng thử lại.")
+            except:
+                pass
+
+    async def send_analysis(self, query, symbol, timeframe='4h'):
+        """Gửi phân tích SMC với error handling improved"""
+        try:
+            await query.edit_message_text("🔄 Đang phân tích... Vui lòng đợi...")
+            
+            # Timeout cho việc lấy dữ liệu
+            result = await asyncio.wait_for(
+                asyncio.to_thread(self.smc_analyzer.get_trading_signals, symbol, timeframe),
+                timeout=30.0
+            )
             
             if result is None:
                 await query.edit_message_text("❌ Không thể lấy dữ liệu. Vui lòng thử lại sau.")
                 return
             
-            # Format message với error handling
-            try:
-                message = self.format_analysis_message(result)
-            except Exception as e:
-                logger.error(f"Error formatting message: {e}")
-                message = f"❌ Lỗi khi format message cho {symbol}\nVui lòng thử lại sau."
-                await query.edit_message_text(message)
-                return
+            # Format message
+            message = self.format_analysis_message(result)
             
-            # Tạo keyboard với nhiều timeframe hơn
-            symbol_encoded = symbol.replace('/', '_')  # BTC/USDT -> BTC_USDT for callback
+            # Create keyboard
+            symbol_encoded = symbol.replace('/', '_')
             keyboard = [
                 [InlineKeyboardButton("📊 15m", callback_data=f'tf_{symbol_encoded}_15m'),
                  InlineKeyboardButton("📊 1h", callback_data=f'tf_{symbol_encoded}_1h'),
@@ -96,20 +138,21 @@ Chọn một tùy chọn bên dưới để bắt đầu:
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            # Gửi message với error handling cho markdown
+            # Send message with fallback
             try:
                 await query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
             except Exception as e:
                 logger.error(f"Markdown parse error: {e}")
-                # Fallback: gửi message không có markdown
                 plain_message = message.replace('*', '').replace('_', '')
                 await query.edit_message_text(plain_message, reply_markup=reply_markup)
         
+        except asyncio.TimeoutError:
+            await query.edit_message_text("⏰ Timeout - Phân tích mất quá nhiều thời gian. Vui lòng thử lại.")
         except Exception as e:
-            logger.error(f"Error in analysis: {e}")
-            error_msg = f"❌ Lỗi khi phân tích {symbol}:\n{str(e)[:100]}..."
+            logger.error(f"Error in send_analysis: {e}")
+            error_msg = f"❌ Lỗi khi phân tích {symbol}: {str(e)[:100]}..."
             await query.edit_message_text(error_msg)
-    
+
     def format_analysis_message(self, result):
         """Format kết quả phân tích thành message Telegram với thông tin chi tiết"""
         smc = result['smc_analysis']
@@ -411,21 +454,96 @@ Chọn cặp để phân tích:
             await update.message.reply_text("Cách sử dụng: /analysis BTC/USDT 4h")
     
     def run(self):
-        """Chạy bot"""
-        # Tạo application
-        self.application = Application.builder().token(self.token).build()
+        """Chạy bot với error handling và graceful shutdown"""
+        # Setup signal handlers
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
         
-        # Thêm handlers
-        self.application.add_handler(CommandHandler("start", self.start_command))
-        self.application.add_handler(CommandHandler("analysis", self.analysis_command))
-        self.application.add_handler(CallbackQueryHandler(self.button_handler))
-        
-        # Chạy bot
-        print("🤖 Bot đang chạy...")
-        self.application.run_polling()
+        try:
+            # Stop any existing bot instances
+            logger.info("Stopping any existing bot instances...")
+            
+            # Tạo application với retry settings
+            self.application = Application.builder()\
+                .token(self.token)\
+                .read_timeout(30)\
+                .write_timeout(30)\
+                .connect_timeout(30)\
+                .pool_timeout(30)\
+                .build()
+            
+            # Add error handler
+            self.application.add_error_handler(self.error_handler)
+            
+            # Thêm handlers
+            self.application.add_handler(CommandHandler("start", self.start_command))
+            self.application.add_handler(CommandHandler("analysis", self.analysis_command))
+            self.application.add_handler(CallbackQueryHandler(self.button_handler))
+            
+            self.is_running = True
+            
+            # Chạy bot với retry logic
+            logger.info("🤖 Bot đang khởi động...")
+            
+            while self.is_running:
+                try:
+                    self.application.run_polling(
+                        poll_interval=1.0,
+                        timeout=30,
+                        bootstrap_retries=3,
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=30,
+                        pool_timeout=30
+                    )
+                except Conflict as e:
+                    logger.error(f"Bot conflict: {e}")
+                    logger.info("Waiting 30 seconds before retry...")
+                    time.sleep(30)
+                except (TimedOut, NetworkError) as e:
+                    logger.error(f"Network error: {e}")
+                    logger.info("Waiting 10 seconds before retry...")
+                    time.sleep(10)
+                except Exception as e:
+                    logger.error(f"Unexpected error: {e}")
+                    logger.info("Waiting 15 seconds before retry...")
+                    time.sleep(15)
+                    
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user")
+        except Exception as e:
+            logger.error(f"Fatal error: {e}")
+        finally:
+            self.is_running = False
+            if self.application:
+                try:
+                    asyncio.run(self.application.stop())
+                except:
+                    pass
+            logger.info("Bot shutdown complete")
 
 if __name__ == "__main__":
-    # Thay YOUR_BOT_TOKEN bằng token thực của bot
-    BOT_TOKEN = "8213040530:AAH8oDArhEH75ORttMobEaz6L6lR9CbR53s"
+    # Kiểm tra token
+    BOT_TOKEN = "7875623912:AAF1aw7227NEDWgKUWC0va9dhSbvbsCMj0c"
+    
+    if not BOT_TOKEN or BOT_TOKEN == "BOT_TOKEN":
+        print("❌ Vui lòng cập nhật BOT_TOKEN")
+        sys.exit(1)
+    
+    # Kiểm tra process đang chạy
+    import psutil
+    current_pid = os.getpid()
+    
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if proc.info['pid'] != current_pid and 'telegram_bot.py' in ' '.join(proc.info['cmdline'] or []):
+                print(f"❌ Phát hiện bot instance khác đang chạy (PID: {proc.info['pid']})")
+                print("Stopping existing instance...")
+                proc.terminate()
+                time.sleep(3)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    
+    # Khởi động bot
     bot = TradingBot(BOT_TOKEN)
     bot.run()
