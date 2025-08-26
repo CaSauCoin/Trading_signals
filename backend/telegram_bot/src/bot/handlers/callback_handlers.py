@@ -29,6 +29,9 @@ except Exception as e:
 
 logger = logging.getLogger(__name__)
 
+# Import global state storage
+from .message_handlers import USER_STATES
+
 def handle_callback(update: Update, context: CallbackContext):
     """Main callback handler for inline keyboard buttons"""
     query = update.callback_query
@@ -69,7 +72,9 @@ def handle_callback(update: Update, context: CallbackContext):
 
 def handle_custom_token_callback(query, context, user_id):
     """Handle custom token input callback"""
-    context.bot_data['user_states'][user_id] = {"waiting_for": "custom_token"}
+    # Set state in global storage
+    USER_STATES[user_id] = {"waiting_for": "custom_token"}
+    logger.info(f"Set user {user_id} state to waiting_for: custom_token in global storage")
     
     # Add a back button for better UX
     keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data='start')]]
@@ -453,14 +458,9 @@ def handle_add_to_watchlist(query, context, scheduler_service):
     """Handle add to watchlist"""
     user_id = query.from_user.id
     
-    # Initialize user states if not exists
-    if not hasattr(context.bot_data, 'user_states'):
-        context.bot_data['user_states'] = {}
-        logger.info("Initialized user_states in callback handler")
-    
-    # Set the waiting state
-    context.bot_data['user_states'][user_id] = {"waiting_for": "watchlist_token"}
-    logger.info(f"Set user {user_id} state to waiting_for: watchlist_token")
+    # Set the waiting state in global storage
+    USER_STATES[user_id] = {"waiting_for": "watchlist_token"}
+    logger.info(f"Set user {user_id} state to waiting_for: watchlist_token in global storage")
     
     keyboard = [[InlineKeyboardButton("🔙 Back", callback_data='watchlist_menu')]]
     reply_markup = InlineKeyboardMarkup(keyboard)

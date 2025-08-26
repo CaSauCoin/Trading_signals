@@ -5,6 +5,9 @@ from telegram.ext import CallbackContext
 
 logger = logging.getLogger(__name__)
 
+# Global state storage to persist between handlers
+USER_STATES = {}
+
 def handle_message(update: Update, context: CallbackContext):
     """Handle text messages from users"""
     user_id = update.effective_user.id
@@ -12,28 +15,23 @@ def handle_message(update: Update, context: CallbackContext):
     
     logger.info(f"User {user_id} sent message: {message_text}")
     
-    # Initialize user states if not exists
-    if not hasattr(context.bot_data, 'user_states'):
-        context.bot_data['user_states'] = {}
-        logger.info("Initialized user_states in bot_data")
-    
-    # Check if user is in a waiting state
-    user_state = context.bot_data['user_states'].get(user_id)
-    logger.info(f"User {user_id} state: {user_state}")
+    # Use global state storage instead of context.bot_data
+    user_state = USER_STATES.get(user_id)
+    logger.info(f"User {user_id} state from global storage: {user_state}")
     
     if user_state and user_state.get('waiting_for') == 'custom_token':
         logger.info(f"Processing custom token for user {user_id}: {message_text}")
         handle_custom_token_input(update, context, message_text)
         # Clear the waiting state
-        if user_id in context.bot_data['user_states']:
-            del context.bot_data['user_states'][user_id]
+        if user_id in USER_STATES:
+            del USER_STATES[user_id]
             logger.info(f"Cleared custom_token state for user {user_id}")
     elif user_state and user_state.get('waiting_for') == 'watchlist_token':
         logger.info(f"Processing watchlist token for user {user_id}: {message_text}")
         handle_watchlist_token_input(update, context, message_text)
         # Clear the waiting state
-        if user_id in context.bot_data['user_states']:
-            del context.bot_data['user_states'][user_id]
+        if user_id in USER_STATES:
+            del USER_STATES[user_id]
             logger.info(f"Cleared watchlist_token state for user {user_id}")
     else:
         logger.info(f"No matching state for user {user_id}, showing default response")
@@ -67,7 +65,7 @@ def handle_watchlist_token_input(update: Update, context: CallbackContext, token
             )
             return
         
-        # Get or create scheduler service - FIX IMPORT PATH
+        # Get or create scheduler service using global storage
         if 'scheduler_service' not in context.bot_data:
             logger.info("Creating new scheduler service instance")
             try:
