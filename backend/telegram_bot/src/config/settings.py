@@ -41,3 +41,6 @@ class Config:
     @staticmethod
     def init_app(app):
         pass  # Additional app initialization can be done here if needed
+
+# Other settings
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'

@@ -2,44 +2,30 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
 
 def start_command(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    
-    # Initialize user state if not exists
-    if not hasattr(context.bot_data, 'user_states'):
-        context.bot_data['user_states'] = {}
-    
-    context.bot_data['user_states'][user_id] = {"waiting_for": None}
-    
+    """Handler for /start command"""
     keyboard = [
-        [InlineKeyboardButton("📊 Phân tích BTC/USDT", callback_data='analyze_BTC/USDT')],
-        [InlineKeyboardButton("📈 Phân tích ETH/USDT", callback_data='analyze_ETH/USDT')],
-        [InlineKeyboardButton("🔍 Chọn cặp có sẵn", callback_data='select_pair')],
-        [InlineKeyboardButton("✏️ Nhập token tùy chỉnh", callback_data='custom_token')],
-        [InlineKeyboardButton("👁️ Danh sách theo dõi", callback_data='watchlist_menu')],
-        [InlineKeyboardButton("ℹ️ Hướng dẫn", callback_data='help')]
+        [InlineKeyboardButton("📊 Analyze BTC/USDT", callback_data='analyze_BTC/USDT')],
+        [InlineKeyboardButton("📈 Analyze ETH/USDT", callback_data='analyze_ETH/USDT')],
+        [InlineKeyboardButton("🔍 Select Other Pair", callback_data='select_pair')],
+        [InlineKeyboardButton("ℹ️ Help", callback_data='help')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_text = """
 🚀 **Trading Bot SMC!**
 
-Chọn một tùy chọn bên dưới để bắt đầu:
-
-💡 **Mới:** 
-• Nhập bất kỳ token nào trên Binance!
-• Theo dõi tự động với cập nhật mỗi giờ!
+Choose an option below to get started:
     """
     
     update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
 
 def analysis_command(update: Update, context: CallbackContext):
+    """Handler for /analysis command"""
     if context.args:
         symbol = context.args[0].upper()
         timeframe = context.args[1] if len(context.args) > 1 else '4h'
         
-        update.message.reply_text(f"🔄 Đang phân tích {symbol} {timeframe}...")
-        
-        # TODO: Implement analysis logic
-        update.message.reply_text("⚠️ Chức năng phân tích đang được phát triển...")
+        update.message.reply_text(f"🔄 Analyzing {symbol} {timeframe}...")
+        # Analysis logic here...
     else:
-        update.message.reply_text("Cách sử dụng: /analysis BTC/USDT 4h")
+        update.message.reply_text("Usage: /analysis BTC/USDT 4h")

@@ -1,36 +1,48 @@
-# Dùng Python base image
-FROM python:3.11-slim
+# Use Python 3.10 to match your development environment
+FROM python:3.10-slim
 
-# Tạo thư mục app
+# Set working directory
 WORKDIR /app
 
-# Cài đặt các dependencies của hệ thống
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     build-essential \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements và cài đặt dependencies
+# Copy requirements first (for better caching)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy toàn bộ project
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy the entire project
 COPY . .
 
-# Thiết lập biến môi trường
+# Set environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-# Thiết lập working directory
+# Set working directory to backend
 WORKDIR /app/backend
 
-# Debug: Hiển thị cấu trúc thư mục
-RUN echo "=== App structure ===" && \
-    find /app -type f -name "*.py" | head -20
+# Debug: Show project structure
+RUN echo "=== Project Structure ===" && \
+    find /app -name "*.py" | head -20 && \
+    echo "=== Backend Directory ===" && \
+    ls -la && \
+    echo "=== Config Check ===" && \
+    ls -la config/ || echo "No config directory"
 
-# Khai báo cổng
+# Expose port for Railway
 EXPOSE $PORT
 
-# Khởi chạy bot
-CMD ["python3", "main.py"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import sys; print('Bot is healthy')" || exit 1
+
+# Run the bot
+CMD ["python", "main.py"]
 
