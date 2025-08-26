@@ -629,7 +629,7 @@ def handle_back_to_main(query, context):
         [InlineKeyboardButton("ℹ️ Help", callback_data='help')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     welcome_text = """
 🚀 **Trading Bot SMC**
 
