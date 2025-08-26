@@ -1,10 +1,10 @@
+import logging
+import os
+import sys
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
-import sys
-import os
 
 # Add the correct path to AdvancedSMC
-# Navigate from current file to the AdvancedSMC directory
 current_dir = os.path.dirname(__file__)  # handlers directory
 src_dir = os.path.dirname(os.path.dirname(current_dir))  # src directory
 telegram_bot_dir = os.path.dirname(src_dir)  # telegram_bot directory
@@ -15,23 +15,22 @@ sys.path.insert(0, advancedSMC_path)
 try:
     from AdvancedSMC import AdvancedSMC
     SMC_AVAILABLE = True
+    # Initialize analysis service
+    analysis_service = AdvancedSMC()
+    print("AdvancedSMC initialized successfully")
 except ImportError as e:
     print(f"Warning: Could not import AdvancedSMC: {e}")
     SMC_AVAILABLE = False
     AdvancedSMC = None
-
-# Initialize analysis service if available
-if SMC_AVAILABLE and AdvancedSMC:
-    try:
-        analysis_service = AdvancedSMC()
-        print("AdvancedSMC initialized successfully")
-    except Exception as e:
-        print(f"Error initializing AdvancedSMC: {e}")
-        analysis_service = None
-else:
+    analysis_service = None
+except Exception as e:
+    print(f"Error initializing AdvancedSMC: {e}")
     analysis_service = None
 
+logger = logging.getLogger(__name__)
+
 def handle_callback(update: Update, context: CallbackContext):
+    """Main callback handler for inline keyboard buttons"""
     query = update.callback_query
     query.answer()
     
@@ -57,7 +56,11 @@ def handle_callback(update: Update, context: CallbackContext):
         handle_timeframe_callback(query, context, data)
     elif data.startswith('refresh_'):
         handle_refresh_callback(query, context, data)
-    elif data == 'back_to_main':
+    elif data.startswith('tf_'):
+        handle_tf_callback(query, context, data)
+    elif data.startswith('pair_'):
+        handle_pair_callback(query, context, data)
+    elif data == 'back_to_main' or data == 'start':
         handle_back_to_main(query, context)
     elif data == 'help':
         show_help(query)
@@ -88,23 +91,37 @@ def handle_analyze_callback(query, context, data):
     
     perform_analysis_callback(query, context, symbol, timeframe)
 
+def handle_tf_callback(query, context, data):
+    """Handle timeframe callback (tf_SYMBOL_TIMEFRAME)"""
+    parts = data.replace('tf_', '').split('_')
+    if len(parts) >= 2:
+        symbol = '_'.join(parts[:-1])  # Ghép lại symbol
+        symbol = symbol.replace('_', '/')  # Convert back to BTC/USDT format
+        timeframe = parts[-1]
+        perform_analysis_callback(query, context, symbol, timeframe)
+
+def handle_pair_callback(query, context, data):
+    """Handle pair selection callback"""
+    symbol = data.replace('pair_', '')
+    perform_analysis_callback(query, context, symbol, '4h')
+
 def handle_select_pair_callback(query, context):
     """Handle select pair callback"""
     keyboard = [
-        [InlineKeyboardButton("BTC/USDT", callback_data='analyze_BTC/USDT_4h'),
-         InlineKeyboardButton("ETH/USDT", callback_data='analyze_ETH/USDT_4h')],
-        [InlineKeyboardButton("BNB/USDT", callback_data='analyze_BNB/USDT_4h'),
-         InlineKeyboardButton("ADA/USDT", callback_data='analyze_ADA/USDT_4h')],
-        [InlineKeyboardButton("SOL/USDT", callback_data='analyze_SOL/USDT_4h'),
-         InlineKeyboardButton("DOT/USDT", callback_data='analyze_DOT/USDT_4h')],
-        [InlineKeyboardButton("MATIC/USDT", callback_data='analyze_MATIC/USDT_4h'),
-         InlineKeyboardButton("AVAX/USDT", callback_data='analyze_AVAX/USDT_4h')],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data='back_to_main')]
+        [InlineKeyboardButton("₿ BTC/USDT", callback_data='pair_BTC/USDT'),
+         InlineKeyboardButton("Ξ ETH/USDT", callback_data='pair_ETH/USDT')],
+        [InlineKeyboardButton("🟡 BNB/USDT", callback_data='pair_BNB/USDT'),
+         InlineKeyboardButton("🔵 WLD/USDT", callback_data='pair_WLD/USDT')],
+        [InlineKeyboardButton("🟣 SOL/USDT", callback_data='pair_SOL/USDT'),
+         InlineKeyboardButton("🔴 SEI/USDT", callback_data='pair_SEI/USDT')],
+        [InlineKeyboardButton("🟢 PEPE/USDT", callback_data='pair_PEPE/USDT'),
+         InlineKeyboardButton("🟢 SUI/USDT", callback_data='pair_SUI/USDT')],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data='start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     query.edit_message_text(
-        "🔍 **Chọn cặp token phổ biến:**",
+        "📊 **Chọn cặp trading để phân tích:**",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -120,7 +137,7 @@ def handle_timeframe_callback(query, context, data):
          InlineKeyboardButton("1d", callback_data=f'analyze_{symbol}_1d')],
         [InlineKeyboardButton("3d", callback_data=f'analyze_{symbol}_3d'),
          InlineKeyboardButton("1w", callback_data=f'analyze_{symbol}_1w')],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data='back_to_main')]
+        [InlineKeyboardButton("🔙 Quay lại", callback_data='start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -147,8 +164,8 @@ def perform_analysis_callback(query, context, symbol: str, timeframe: str):
         # Check if analysis service is available
         if not analysis_service:
             query.edit_message_text(
-                f"❌ **Lỗi hệ thống**\n\n"
-                f"AdvancedSMC service không khả dụng.",
+                "❌ **Lỗi:** Dịch vụ phân tích không khả dụng.\n"
+                "Vui lòng thử lại sau.",
                 parse_mode='Markdown'
             )
             return
@@ -158,8 +175,7 @@ def perform_analysis_callback(query, context, symbol: str, timeframe: str):
         
         if result.get('error'):
             query.edit_message_text(
-                f"❌ **Lỗi phân tích {symbol}**\n\n"
-                f"Chi tiết: {result.get('message', 'Unknown error')}",
+                f"❌ **Lỗi phân tích {symbol}:**\n{result.get('message', 'Unknown error')}",
                 parse_mode='Markdown'
             )
             return
@@ -168,22 +184,31 @@ def perform_analysis_callback(query, context, symbol: str, timeframe: str):
         formatted_result = format_analysis_result(result)
         
         # Create action buttons
+        symbol_encoded = symbol.replace('/', '_')  # BTC/USDT -> BTC_USDT for callback
         keyboard = [
-            [InlineKeyboardButton("➕ Thêm vào Watchlist", callback_data=f'watchlist_add_{symbol}_{timeframe}')],
-            [InlineKeyboardButton("🔄 Làm mới", callback_data=f'refresh_{symbol}_{timeframe}')],
-            [InlineKeyboardButton("⏱️ Đổi timeframe", callback_data=f'timeframe_{symbol}')],
-            [InlineKeyboardButton("🔙 Menu chính", callback_data='back_to_main')]
+            [InlineKeyboardButton("📊 15m", callback_data=f'tf_{symbol_encoded}_15m'),
+             InlineKeyboardButton("📊 1h", callback_data=f'tf_{symbol_encoded}_1h'),
+             InlineKeyboardButton("📊 4h", callback_data=f'tf_{symbol_encoded}_4h')],
+            [InlineKeyboardButton("📊 1d", callback_data=f'tf_{symbol_encoded}_1d'),
+             InlineKeyboardButton("📊 3d", callback_data=f'tf_{symbol_encoded}_3d'),
+             InlineKeyboardButton("📊 1w", callback_data=f'tf_{symbol_encoded}_1w')],
+            [InlineKeyboardButton("🔄 Refresh", callback_data=f'tf_{symbol_encoded}_{timeframe}'),
+             InlineKeyboardButton("🏠 Menu", callback_data='start')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        query.edit_message_text(formatted_result, reply_markup=reply_markup, parse_mode='Markdown')
+        # Send formatted result
+        try:
+            query.edit_message_text(formatted_result, reply_markup=reply_markup, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Markdown parse error: {e}")
+            # Fallback: send message without markdown
+            plain_message = formatted_result.replace('*', '').replace('_', '')
+            query.edit_message_text(plain_message, reply_markup=reply_markup)
         
     except Exception as e:
-        query.edit_message_text(
-            f"❌ **Lỗi phân tích {symbol}**\n\n"
-            f"Chi tiết: {str(e)}",
-            parse_mode='Markdown'
-        )
+        logger.error(f"Error in analysis: {e}")
+        query.edit_message_text(f"❌ **Lỗi khi phân tích {symbol}:**\n{str(e)[:100]}...")
 
 def analyze_with_smc(symbol: str, timeframe: str):
     """Analyze symbol using AdvancedSMC"""
@@ -200,66 +225,129 @@ def analyze_with_smc(symbol: str, timeframe: str):
         elif '/' in symbol:
             symbol = symbol.replace('/', '')
         
-        print(f"Analyzing {symbol} {timeframe} with AdvancedSMC...")
+        logger.info(f"Analyzing {symbol} {timeframe} with AdvancedSMC...")
         
-        # Call your AdvancedSMC methods here
-        # Adjust these method names based on your actual AdvancedSMC class
+        # Call AdvancedSMC analysis method
+        analysis_result = analysis_service.get_trading_signals(symbol, timeframe)
         
-        # Example calls (you need to replace with actual method names):
-        # order_blocks = analysis_service.get_order_blocks(symbol, timeframe)
-        # fvg = analysis_service.get_fair_value_gaps(symbol, timeframe)
-        # bos = analysis_service.get_break_of_structure(symbol, timeframe)
-        # signal = analysis_service.get_trading_signal(symbol, timeframe)
+        if analysis_result is None:
+            return {
+                'error': True,
+                'message': 'Không thể lấy dữ liệu từ exchange'
+            }
         
-        # For now, return mock data - replace with actual analysis
+        # Format the result
         result = {
             'error': False,
             'symbol': symbol,
             'timeframe': timeframe,
-            'analysis': {
-                'signal': {'signal': 'BUY', 'confidence': 75},
-                'order_blocks': {'status': 'Bullish OB found', 'count': 2},
-                'fair_value_gaps': {'status': 'FVG detected', 'direction': 'bullish'},
-                'break_of_structure': {'status': 'BOS confirmed', 'direction': 'up'},
-                'liquidity_zones': {'status': 'Liquidity swept', 'level': 'high'},
-                'timestamp': '2025-08-26T15:30:00'
-            }
+            'analysis': analysis_result,
+            'timestamp': analysis_result.get('timestamp') if analysis_result else None
         }
         
         return result
         
     except Exception as e:
-        print(f"Error in SMC analysis: {e}")
+        logger.error(f"Error in SMC analysis: {e}")
         return {
             'error': True,
             'message': f'Analysis failed: {str(e)}'
         }
 
+def format_analysis_result(result: dict) -> str:
+    """Format analysis results for display"""
+    if result.get('error'):
+        return f"❌ **Lỗi:** {result.get('message', 'Unknown error')}"
+    
+    analysis_data = result.get('analysis', {})
+    symbol = result.get('symbol', 'Unknown')
+    timeframe = result.get('timeframe', '4h')
+    
+    # Use the same formatting logic from your TradingBot class
+    smc = analysis_data.get('smc_analysis', {})
+    indicators = analysis_data.get('indicators', {})
+    trading_signals = analysis_data.get('trading_signals', {})
+    
+    # Header
+    message = f"📊 *Phân tích {symbol} - {timeframe}*\n\n"
+    
+    # Price info
+    current_price = analysis_data.get('current_price', 0)
+    message += f"💰 *Giá hiện tại:* ${current_price:,.2f}\n"
+    
+    # Indicators
+    rsi = indicators.get('rsi', 50)
+    rsi_emoji = "🟢" if rsi < 30 else ("🔴" if rsi > 70 else "🟡")
+    message += f"📈 *RSI:* {rsi_emoji} {rsi:.1f}\n"
+    message += f"📊 *SMA 20:* ${indicators.get('sma_20', 0):,.2f}\n"
+    message += f"📉 *EMA 20:* ${indicators.get('ema_20', 0):,.2f}\n\n"
+    
+    # Price change
+    price_change = indicators.get('price_change_pct', 0)
+    change_emoji = "📈" if price_change > 0 else "📉"
+    message += f"{change_emoji} *Thay đổi:* {price_change:+.2f}%\n\n"
+    
+    # SMC Analysis
+    message += "🔍 *SMC ANALYSIS:*\n"
+    
+    # Order Blocks
+    ob_count = len(smc.get('order_blocks', []))
+    message += f"📦 *Order Blocks:* {ob_count}\n"
+    
+    # Fair Value Gaps
+    fvg_count = len(smc.get('fair_value_gaps', []))
+    message += f"🎯 *Fair Value Gaps:* {fvg_count}\n"
+    
+    # Break of Structure
+    bos_count = len(smc.get('break_of_structure', []))
+    message += f"🔄 *Structure Breaks:* {bos_count}\n"
+    
+    # Liquidity Zones
+    lz_count = len(smc.get('liquidity_zones', []))
+    message += f"💧 *Liquidity Zones:* {lz_count}\n\n"
+    
+    # Trading Signals
+    if trading_signals:
+        message += "🔔 *TRADING SIGNALS:*\n"
+        
+        entry_long = trading_signals.get('entry_long', [])
+        entry_short = trading_signals.get('entry_short', [])
+        
+        if entry_long:
+            latest_long = entry_long[-1]
+            message += f"🟢 *Long Signal:* ${latest_long.get('price', 0):,.2f}\n"
+        
+        if entry_short:
+            latest_short = entry_short[-1]
+            message += f"🔴 *Short Signal:* ${latest_short.get('price', 0):,.2f}\n"
+        
+        if not entry_long and not entry_short:
+            message += "⏸️ Không có signal nào\n"
+        
+        message += "\n"
+    
+    # Timestamp
+    try:
+        from datetime import datetime
+        timestamp = datetime.fromtimestamp(result.get('timestamp', 0))
+        message += f"🕐 *Cập nhật:* {timestamp.strftime('%H:%M:%S %d/%m/%Y')}"
+    except:
+        message += f"🕐 *Cập nhật:* {result.get('timestamp', 'N/A')}"
+    
+    return message.strip()
+
 def handle_watchlist_callback(query, context, data):
     """Handle watchlist related callbacks"""
     if data == 'watchlist_add':
-        user_id = query.from_user.id
-        context.bot_data['user_states'][user_id] = {"waiting_for": "watchlist_add"}
-        query.edit_message_text(
-            "➕ **Thêm token vào Watchlist**\n\n"
-            "Gửi tên token bạn muốn theo dõi:\n"
-            "• Ví dụ: BTC, ETH, PEPE\n"
-            "• Hoặc cặp: BTC/USDT, ETH/USDT\n\n"
-            "💡 Sẽ sử dụng timeframe 4h mặc định.",
-            parse_mode='Markdown'
-        )
+        query.edit_message_text("🚧 Tính năng watchlist đang được phát triển...")
     elif data.startswith('watchlist_add_'):
-        # Extract symbol and timeframe from callback
-        parts = data.replace('watchlist_add_', '').split('_')
-        symbol = '_'.join(parts[:-1])
-        timeframe = parts[-1]
-        add_to_watchlist_callback(query, context, symbol, timeframe)
+        symbol = data.replace('watchlist_add_', '')
+        add_to_watchlist_callback(query, context, symbol, '4h')
     else:
-        query.edit_message_text("⚠️ Chức năng watchlist đang được phát triển...")
+        query.edit_message_text("🚧 Tính năng watchlist đang được phát triển...")
 
 def add_to_watchlist_callback(query, context, symbol: str, timeframe: str):
     """Add token to watchlist via callback"""
-    # TODO: Implement actual watchlist storage
     query.edit_message_text(
         f"✅ **Đã thêm {symbol} ({timeframe}) vào watchlist!**\n\n"
         "📋 Sử dụng menu Watchlist để quản lý danh sách theo dõi.",
@@ -269,9 +357,9 @@ def add_to_watchlist_callback(query, context, symbol: str, timeframe: str):
 def handle_back_to_main(query, context):
     """Handle back to main menu"""
     keyboard = [
-        [InlineKeyboardButton("📊 Phân tích BTC/USDT", callback_data='analyze_BTC/USDT_4h')],
-        [InlineKeyboardButton("📈 Phân tích ETH/USDT", callback_data='analyze_ETH/USDT_4h')],
-        [InlineKeyboardButton("🔍 Chọn cặp có sẵn", callback_data='select_pair')],
+        [InlineKeyboardButton("📊 Phân tích BTC/USDT", callback_data='pair_BTC/USDT')],
+        [InlineKeyboardButton("📈 Phân tích ETH/USDT", callback_data='pair_ETH/USDT')],
+        [InlineKeyboardButton("🔍 Chọn cặp khác", callback_data='select_pair')],
         [InlineKeyboardButton("✏️ Nhập token tùy chỉnh", callback_data='custom_token')],
         [InlineKeyboardButton("👁️ Danh sách theo dõi", callback_data='watchlist_menu')],
         [InlineKeyboardButton("ℹ️ Hướng dẫn", callback_data='help')]
@@ -279,54 +367,19 @@ def handle_back_to_main(query, context):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_text = """
-🚀 **Trading Bot SMC!**
+🚀 **Trading Bot SMC**
 
-Chọn một tùy chọn bên dưới để bắt đầu:
+**Các tính năng:**
+• 📊 Order Blocks Analysis
+• 🎯 Fair Value Gaps Detection  
+• 📈 Break of Structure Signals
+• 💧 Liquidity Zones Mapping
+• 🔔 Entry/Exit Signals
 
-💡 **Mới:** 
-• Nhập bất kỳ token nào trên Binance!
-• Theo dõi tự động với cập nhật mỗi giờ!
+Chọn cặp để phân tích:
     """
     
     query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
-
-def format_analysis_result(result: dict) -> str:
-    """Format analysis results for display"""
-    if result.get('error'):
-        return f"❌ **Lỗi:** {result.get('message')}"
-    
-    symbol = result.get('symbol', 'Unknown')
-    timeframe = result.get('timeframe', '4h')
-    analysis = result.get('analysis', {})
-    
-    # Extract analysis data
-    signal = analysis.get('signal', {})
-    order_blocks = analysis.get('order_blocks', {})
-    fvg = analysis.get('fair_value_gaps', {})
-    bos = analysis.get('break_of_structure', {})
-    liquidity = analysis.get('liquidity_zones', {})
-    
-    # Format signal emoji
-    signal_emoji = "🟢" if signal.get('signal') == 'BUY' else "🔴" if signal.get('signal') == 'SELL' else "🟡"
-    
-    # Format the message
-    formatted_msg = f"""
-📊 **Phân tích SMC: {symbol} ({timeframe})**
-
-{signal_emoji} **Tín hiệu:** {signal.get('signal', 'NEUTRAL')}
-📈 **Độ tin cậy:** {signal.get('confidence', 0)}%
-
-🔲 **Order Blocks:** {order_blocks.get('status', 'N/A')}
-⚡ **Fair Value Gaps:** {fvg.get('status', 'N/A')}
-📊 **Break of Structure:** {bos.get('status', 'N/A')}
-💧 **Liquidity Zones:** {liquidity.get('status', 'N/A')}
-
-⏰ **Cập nhật:** {analysis.get('timestamp', 'N/A')}
-
-⚠️ *Chỉ mang tính chất tham khảo, không phải lời khuyên đầu tư.*
-    """
-    
-    return formatted_msg.strip()
 
 def show_watchlist_menu(query, context):
     """Show watchlist management menu"""
@@ -334,7 +387,7 @@ def show_watchlist_menu(query, context):
         [InlineKeyboardButton("➕ Thêm token", callback_data='watchlist_add')],
         [InlineKeyboardButton("📋 Xem danh sách", callback_data='watchlist_view')],
         [InlineKeyboardButton("🗑️ Xóa token", callback_data='watchlist_remove')],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data='back_to_main')]
+        [InlineKeyboardButton("🔙 Quay lại", callback_data='start')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -351,29 +404,37 @@ def show_watchlist_menu(query, context):
 def show_help(query):
     """Show help information"""
     help_text = """
-ℹ️ **Hướng dẫn sử dụng Trading Bot SMC**
+📖 **Hướng dẫn Trading Bot SMC**
 
-**🎯 Tính năng chính:**
-• Phân tích SMC (Smart Money Concepts)
-• Order Blocks, Fair Value Gaps
-• Break of Structure, Liquidity Zones
-• Watchlist tự động cập nhật
+**Smart Money Concepts:**
 
-**📱 Cách sử dụng:**
-1️⃣ Chọn token từ menu
-2️⃣ Hoặc nhập token tùy chỉnh
-3️⃣ Xem kết quả phân tích
-4️⃣ Thêm vào watchlist nếu muốn
+🎯 **Order Blocks (OB):** 
+• Khu vực mà smart money đặt lệnh lớn
+• Bullish OB: Nến giảm trước BOS tăng
+• Bearish OB: Nến tăng trước BOS giảm
 
-**⚡ Lệnh nhanh:**
-• /start - Hiển thị menu
-• /analysis BTC/USDT 4h - Phân tích trực tiếp
+📈 **Fair Value Gap (FVG):**
+• Khoảng trống giá trên chart
+• Thường được "fill" lại bởi giá
+• Signal entry khi retest FVG
 
-**⚠️ Lưu ý:**
-Bot chỉ hỗ trợ phân tích, không phải lời khuyên đầu tư.
+🔄 **Break of Structure (BOS):**
+• Phá vỡ mức swing high/low trước đó
+• Xác nhận thay đổi xu hướng
+• Bullish BOS: Phá swing high
+• Bearish BOS: Phá swing low
+
+💧 **Liquidity Zones:**
+• Khu vực có thanh khoản cao
+• Smart money thường quét thanh khoản
+• BSL: Buy Side Liquidity (trên)
+• SSL: Sell Side Liquidity (dưới)
+
+⚠️ **Lưu ý:** 
+Đây là công cụ hỗ trợ phân tích, không phải lời khuyên đầu tư.
     """
     
-    keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data='back_to_main')]]
+    keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data='start')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     query.edit_message_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')
