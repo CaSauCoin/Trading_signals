@@ -4,9 +4,11 @@ from telegram.ext import CallbackContext
 def start_command(update: Update, context: CallbackContext):
     """Handler for /start command"""
     keyboard = [
-        [InlineKeyboardButton("📊 Analyze BTC/USDT", callback_data='analyze_BTC/USDT')],
-        [InlineKeyboardButton("📈 Analyze ETH/USDT", callback_data='analyze_ETH/USDT')],
+        [InlineKeyboardButton("📊 Analyze BTC/USDT", callback_data='pair_BTC/USDT')],
+        [InlineKeyboardButton("📈 Analyze ETH/USDT", callback_data='pair_ETH/USDT')],
         [InlineKeyboardButton("🔍 Select Other Pair", callback_data='select_pair')],
+        [InlineKeyboardButton("✏️ Enter Custom Token", callback_data='custom_token')],
+        [InlineKeyboardButton("👁️ Watchlist", callback_data='watchlist_menu')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='help')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
