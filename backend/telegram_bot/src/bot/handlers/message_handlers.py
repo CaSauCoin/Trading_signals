@@ -67,11 +67,38 @@ def handle_watchlist_token_input(update: Update, context: CallbackContext, token
             )
             return
         
-        # Get or create scheduler service
+        # Get or create scheduler service - FIX IMPORT PATH
         if 'scheduler_service' not in context.bot_data:
             logger.info("Creating new scheduler service instance")
-            from services.scheduler_service import SchedulerService
-            context.bot_data['scheduler_service'] = SchedulerService(None)
+            try:
+                # Import from services directory
+                import sys
+                import os
+                
+                # Add services directory to Python path
+                services_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'services')
+                if services_path not in sys.path:
+                    sys.path.insert(0, services_path)
+                    logger.info(f"Added services path: {services_path}")
+                
+                from scheduler_service import SchedulerService
+                context.bot_data['scheduler_service'] = SchedulerService(None)
+                logger.info("Successfully created scheduler service")
+            except ImportError as e:
+                logger.error(f"Failed to import SchedulerService: {e}")
+                # Try alternative import
+                try:
+                    from services.scheduler_service import SchedulerService
+                    context.bot_data['scheduler_service'] = SchedulerService(None)
+                    logger.info("Successfully imported using services.scheduler_service")
+                except ImportError as e2:
+                    logger.error(f"Alternative import also failed: {e2}")
+                    update.message.reply_text(
+                        "❌ **System error: Watchlist service unavailable**\n\n"
+                        "Please try again later or use /start to return to menu.",
+                        parse_mode='Markdown'
+                    )
+                    return
         
         scheduler_service = context.bot_data['scheduler_service']
         logger.info(f"Got scheduler service: {type(scheduler_service)}")

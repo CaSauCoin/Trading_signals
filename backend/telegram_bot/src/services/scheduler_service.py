@@ -23,10 +23,12 @@ class SchedulerService:
         # Check if already exists
         for token in self.user_watchlists[user_id]['tokens']:
             if token['symbol'] == symbol and token['timeframe'] == timeframe:
+                logger.info(f"Token {symbol} {timeframe} already exists for user {user_id}")
                 return False  # Already exists
         
         # Check limit (max 10 tokens)
         if len(self.user_watchlists[user_id]['tokens']) >= 10:
+            logger.info(f"Watchlist limit reached for user {user_id}")
             return False  # Limit exceeded
         
         self.user_watchlists[user_id]['tokens'].append({
@@ -67,6 +69,7 @@ class SchedulerService:
                 'last_signals': {},
                 'notifications_enabled': True
             }
+            logger.info(f"Cleared watchlist for user {user_id}")
             return True
         return False
     

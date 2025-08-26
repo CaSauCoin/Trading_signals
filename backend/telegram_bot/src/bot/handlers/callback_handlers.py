@@ -384,23 +384,50 @@ def handle_watchlist_callback(query, context, data):
     """Handle watchlist related callbacks"""
     user_id = query.from_user.id
     
-    # Get scheduler service from bot instance
+    # Get scheduler service - FIX IMPORT PATH
     try:
-        # Access through the bot instance
-        bot_instance = context.bot.get_me().username  # This is a hack to get bot instance
-        from bot.trading_bot import TradingBot
-        # We'll store scheduler_service in context.bot_data
         if 'scheduler_service' not in context.bot_data:
-            from services.scheduler_service import SchedulerService
-            context.bot_data['scheduler_service'] = SchedulerService(None)  # We'll fix bot reference later
+            logger.info("Creating scheduler service instance")
+            try:
+                # Import from services directory 
+                import sys
+                import os
+                
+                # Add services directory to Python path
+                services_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'services')
+                if services_path not in sys.path:
+                    sys.path.insert(0, services_path)
+                    logger.info(f"Added services path: {services_path}")
+                
+                from scheduler_service import SchedulerService
+                context.bot_data['scheduler_service'] = SchedulerService(None)
+                logger.info("Successfully created scheduler service")
+            except ImportError as e:
+                logger.error(f"Failed to import SchedulerService: {e}")
+                # Try alternative import
+                try:
+                    from services.scheduler_service import SchedulerService
+                    context.bot_data['scheduler_service'] = SchedulerService(None)
+                    logger.info("Successfully imported using services.scheduler_service")
+                except ImportError as e2:
+                    logger.error(f"Alternative import also failed: {e2}")
+                    query.edit_message_text(
+                        "❌ **Watchlist service temporarily unavailable.**\n\n"
+                        "Please try again later or use /start to return to menu."
+                    )
+                    return
         
         scheduler_service = context.bot_data['scheduler_service']
         
     except Exception as e:
-        logger.error(f"Error accessing scheduler service: {e}")
-        query.edit_message_text("❌ Watchlist service temporarily unavailable.")
+        logger.error(f"Error importing scheduler service: {e}")
+        query.edit_message_text(
+            "❌ **Watchlist service temporarily unavailable.**\n\n"
+            "Please try again later or use /start to return to menu."
+        )
         return
     
+    # Route watchlist callbacks
     if data == 'watchlist_add':
         handle_add_to_watchlist(query, context, scheduler_service)
     elif data == 'watchlist_view':
@@ -411,12 +438,14 @@ def handle_watchlist_callback(query, context, data):
         handle_clear_watchlist(query, context, scheduler_service)
     elif data == 'watchlist_toggle_notifications':
         handle_toggle_notifications(query, context, scheduler_service)
-    elif data.startswith('watchlist_add_'):
-        symbol = data.replace('watchlist_add_', '')
-        add_symbol_to_watchlist(query, context, scheduler_service, symbol)
     elif data.startswith('watchlist_remove_'):
-        symbol = data.replace('watchlist_remove_', '')
-        remove_symbol_from_watchlist(query, context, scheduler_service, symbol)
+        parts = data.replace('watchlist_remove_', '').split('_')
+        if len(parts) >= 2:
+            symbol = '/'.join(parts[:-1])  # Reconstruct symbol 
+            timeframe = parts[-1]
+            remove_symbol_from_watchlist(query, context, scheduler_service, symbol, timeframe)
+    elif data == 'watchlist_confirm_clear':
+        confirm_clear_watchlist(query, context, scheduler_service)
     else:
         query.edit_message_text("🚧 Watchlist feature under development...")
 
