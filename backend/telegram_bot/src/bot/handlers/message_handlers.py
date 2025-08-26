@@ -30,9 +30,7 @@ def handle_message(update: Update, context: CallbackContext):
         update.message.reply_text(
             "🤖 **Use the menu buttons below or send /start to begin.**\n\n"
             "Available commands:\n"
-            "• /start - Main menu\n"
-            "• /analysis [SYMBOL] [TIMEFRAME] - Quick analysis\n\n"
-            "Example: `/analysis BTC 4h`",
+            "• /start - Main menu\n",
             parse_mode='Markdown'
         )
 
