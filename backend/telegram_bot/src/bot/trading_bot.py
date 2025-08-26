@@ -1,6 +1,7 @@
 import logging
 import sys
 import os
+import asyncio
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -52,16 +53,33 @@ class TradingBot:
         self.scheduler = BackgroundScheduler()
         self.scheduler_service = SchedulerService(self)
         
-        # Add watchlist update job every 10 minutes
+        # Wrapper function để run async trong sync context
+        def run_watchlist_update():
+            """Sync wrapper for async watchlist update"""
+            try:
+                # Create new event loop for this thread
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # Run the async function
+                loop.run_until_complete(self.scheduler_service.update_all_watchlists())
+                
+            except Exception as e:
+                logger.error(f"Error in scheduled watchlist update: {e}")
+        
+        # Add job với sync wrapper
         self.scheduler.add_job(
-            self.scheduler_service.update_all_watchlists,
+            run_watchlist_update,  # Use sync wrapper instead
             'interval',
-            minutes=10,
+            hours=1,  # Every 1 hour
             id='watchlist_updates',
-            max_instances=1  # Prevent overlapping executions
+            max_instances=1
         )
         
-        logger.info("Scheduler configured: Watchlist updates every 10 minutes")
+        logger.info("Scheduler configured: Watchlist updates every 1 HOUR")
         
     def run(self):
         """Run the bot"""

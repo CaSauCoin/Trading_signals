@@ -473,7 +473,7 @@ def handle_add_to_watchlist(query, context, scheduler_service):
         "• `ETH 1h` → ETH/USDT 1h\n"
         "• `PEPE/USDT 15m`\n\n"
         "**Limit: 10 tokens maximum**\n"
-        "**Updates: Every 10 minutes**",
+        "**Updates: Every 1 HOUR**",  # Changed from "Every 10 minutes"
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -494,7 +494,10 @@ def handle_view_watchlist(query, context, scheduler_service):
         query.edit_message_text(
             "📋 **Your Watchlist is Empty**\n\n"
             "Add up to 10 tokens for automatic monitoring.\n"
-            "You'll receive notifications every 10 minutes when new signals appear.",
+            "You'll receive comprehensive reports every hour with:\n"
+            "• New trading signals\n"
+            "• Market overview\n"
+            "• Performance statistics",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
@@ -522,7 +525,7 @@ def handle_view_watchlist(query, context, scheduler_service):
     notification_status = "🔔 ON" if notifications_enabled else "🔕 OFF"
     message += f"🔔 Notifications: {notification_status}\n"
     message += f"📊 Total: {len(tokens)}/10 tokens\n"
-    message += f"⏱️ Updates every 10 minutes"
+    message += f"⏱️ Updates every HOUR at :00 minutes"  # Changed from "every 10 minutes"
     
     # Create management buttons
     keyboard = [
@@ -610,9 +613,9 @@ def show_watchlist_menu(query, context):
         "👁️ **Watchlist Management** 👁️\n\n"
         "**Features:**\n"
         "• Monitor up to 10 tokens\n"
-        "• Auto-update every 10 minutes\n"
-        "• Instant signal notifications\n"
-        "• Hourly summary reports\n\n"
+        "• Auto-update every 1 HOUR\n"  # Changed from "every 10 minutes"
+        "• Comprehensive hourly reports\n"
+        "• New signal notifications\n\n"
         "Choose an action:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
