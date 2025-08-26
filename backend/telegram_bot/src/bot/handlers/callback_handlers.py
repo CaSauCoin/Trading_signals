@@ -422,7 +422,16 @@ def handle_watchlist_callback(query, context, data):
 
 def handle_add_to_watchlist(query, context, scheduler_service):
     """Handle add to watchlist"""
-    context.bot_data['user_states'][query.from_user.id] = {"waiting_for": "watchlist_token"}
+    user_id = query.from_user.id
+    
+    # Initialize user states if not exists
+    if not hasattr(context.bot_data, 'user_states'):
+        context.bot_data['user_states'] = {}
+        logger.info("Initialized user_states in callback handler")
+    
+    # Set the waiting state
+    context.bot_data['user_states'][user_id] = {"waiting_for": "watchlist_token"}
+    logger.info(f"Set user {user_id} state to waiting_for: watchlist_token")
     
     keyboard = [[InlineKeyboardButton("🔙 Back", callback_data='watchlist_menu')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
