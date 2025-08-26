@@ -265,6 +265,34 @@ def analyze_with_smc(symbol: str, timeframe: str):
             'message': f'Analysis failed: {str(e)}'
         }
 
+def format_price(price):
+    """Format price based on value range"""
+    if price is None or price == 0:
+        return "$0.00"
+    
+    try:
+        price = float(price)
+        
+        if price >= 10:
+            # For prices >= $10, show 2 decimal places
+            return f"${price:,.2f}"
+        elif price >= 1:
+            # For prices $1-$10, show 4 decimal places
+            return f"${price:.4f}"
+        elif price >= 0.01:
+            # For prices $0.01-$1, show 6 decimal places
+            return f"${price:.6f}"
+        elif price >= 0.0001:
+            # For prices $0.0001-$0.01, show 8 decimal places
+            return f"${price:.8f}"
+        else:
+            # For very small prices, show up to 12 significant digits
+            # Remove trailing zeros
+            formatted = f"${price:.12f}".rstrip('0').rstrip('.')
+            return formatted
+    except (ValueError, TypeError):
+        return f"${price}"
+
 def format_analysis_result(result: dict) -> str:
     """Format analysis results for display"""
     if result.get('error'):
@@ -282,16 +310,19 @@ def format_analysis_result(result: dict) -> str:
     # Header
     message = f"📊 *Analysis {symbol} - {timeframe}*\n\n"
     
-    # Price info
+    # Price info with proper formatting
     current_price = analysis_data.get('current_price', 0)
-    message += f"💰 *Current Price:* ${current_price:,.2f}\n"
+    message += f"💰 *Current Price:* {format_price(current_price)}\n"
     
-    # Indicators
+    # Indicators with proper price formatting
     rsi = indicators.get('rsi', 50)
     rsi_emoji = "🟢" if rsi < 30 else ("🔴" if rsi > 70 else "🟡")
     message += f"📈 *RSI:* {rsi_emoji} {rsi:.1f}\n"
-    message += f"📊 *SMA 20:* ${indicators.get('sma_20', 0):,.2f}\n"
-    message += f"📉 *EMA 20:* ${indicators.get('ema_20', 0):,.2f}\n\n"
+    
+    sma_20 = indicators.get('sma_20', 0)
+    ema_20 = indicators.get('ema_20', 0)
+    message += f"📊 *SMA 20:* {format_price(sma_20)}\n"
+    message += f"📉 *EMA 20:* {format_price(ema_20)}\n\n"
     
     # Price change
     price_change = indicators.get('price_change_pct', 0)
@@ -317,7 +348,7 @@ def format_analysis_result(result: dict) -> str:
     lz_count = len(smc.get('liquidity_zones', []))
     message += f"💧 *Liquidity Zones:* {lz_count}\n\n"
     
-    # Trading Signals
+    # Trading Signals with proper price formatting
     if trading_signals:
         message += "🔔 *TRADING SIGNALS:*\n"
         
@@ -326,11 +357,13 @@ def format_analysis_result(result: dict) -> str:
         
         if entry_long:
             latest_long = entry_long[-1]
-            message += f"🟢 *Long Signal:* ${latest_long.get('price', 0):,.2f}\n"
+            signal_price = latest_long.get('price', 0)
+            message += f"🟢 *Long Signal:* {format_price(signal_price)}\n"
         
         if entry_short:
             latest_short = entry_short[-1]
-            message += f"🔴 *Short Signal:* ${latest_short.get('price', 0):,.2f}\n"
+            signal_price = latest_short.get('price', 0)
+            message += f"🔴 *Short Signal:* {format_price(signal_price)}\n"
         
         if not entry_long and not entry_short:
             message += "⏸️ No active signals\n"
