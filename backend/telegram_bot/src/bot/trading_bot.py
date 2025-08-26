@@ -50,15 +50,18 @@ class TradingBot:
     def setup_scheduler(self):
         """Setup background scheduler"""
         self.scheduler = BackgroundScheduler()
-        scheduler_service = SchedulerService(self)
+        self.scheduler_service = SchedulerService(self)
         
-        # Add hourly watchlist update job
+        # Add watchlist update job every 10 minutes
         self.scheduler.add_job(
-            scheduler_service.update_all_watchlists,
+            self.scheduler_service.update_all_watchlists,
             'interval',
-            hours=1,
-            id='watchlist_updates'
+            minutes=10,
+            id='watchlist_updates',
+            max_instances=1  # Prevent overlapping executions
         )
+        
+        logger.info("Scheduler configured: Watchlist updates every 10 minutes")
         
     def run(self):
         """Run the bot"""

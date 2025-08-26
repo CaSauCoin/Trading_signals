@@ -4,11 +4,12 @@ FROM python:3.10-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including for async operations
 RUN apt-get update && apt-get install -y \
     gcc \
     build-essential \
     pkg-config \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (for better caching)

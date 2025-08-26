@@ -382,19 +382,201 @@ def format_analysis_result(result: dict) -> str:
 
 def handle_watchlist_callback(query, context, data):
     """Handle watchlist related callbacks"""
+    user_id = query.from_user.id
+    
+    # Get scheduler service from bot instance
+    try:
+        # Access through the bot instance
+        bot_instance = context.bot.get_me().username  # This is a hack to get bot instance
+        from bot.trading_bot import TradingBot
+        # We'll store scheduler_service in context.bot_data
+        if 'scheduler_service' not in context.bot_data:
+            from services.scheduler_service import SchedulerService
+            context.bot_data['scheduler_service'] = SchedulerService(None)  # We'll fix bot reference later
+        
+        scheduler_service = context.bot_data['scheduler_service']
+        
+    except Exception as e:
+        logger.error(f"Error accessing scheduler service: {e}")
+        query.edit_message_text("❌ Watchlist service temporarily unavailable.")
+        return
+    
     if data == 'watchlist_add':
-        query.edit_message_text("🚧 Watchlist feature under development...")
+        handle_add_to_watchlist(query, context, scheduler_service)
+    elif data == 'watchlist_view':
+        handle_view_watchlist(query, context, scheduler_service)
+    elif data == 'watchlist_remove':
+        handle_remove_from_watchlist(query, context, scheduler_service)
+    elif data == 'watchlist_clear':
+        handle_clear_watchlist(query, context, scheduler_service)
+    elif data == 'watchlist_toggle_notifications':
+        handle_toggle_notifications(query, context, scheduler_service)
     elif data.startswith('watchlist_add_'):
         symbol = data.replace('watchlist_add_', '')
-        add_to_watchlist_callback(query, context, symbol, '4h')
+        add_symbol_to_watchlist(query, context, scheduler_service, symbol)
+    elif data.startswith('watchlist_remove_'):
+        symbol = data.replace('watchlist_remove_', '')
+        remove_symbol_from_watchlist(query, context, scheduler_service, symbol)
     else:
         query.edit_message_text("🚧 Watchlist feature under development...")
 
-def add_to_watchlist_callback(query, context, symbol: str, timeframe: str):
-    """Add token to watchlist via callback"""
+def handle_add_to_watchlist(query, context, scheduler_service):
+    """Handle add to watchlist"""
+    context.bot_data['user_states'][query.from_user.id] = {"waiting_for": "watchlist_token"}
+    
+    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data='watchlist_menu')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     query.edit_message_text(
-        f"✅ **Added {symbol} ({timeframe}) to watchlist!**\n\n"
-        "📋 Use Watchlist menu to manage your tracking list.",
+        "➕ **Add Token to Watchlist**\n\n"
+        "Send token name with optional timeframe:\n\n"
+        "**Examples:**\n"
+        "• `BTC` → BTC/USDT 4h\n"
+        "• `ETH 1h` → ETH/USDT 1h\n"
+        "• `PEPE/USDT 15m`\n\n"
+        "**Limit: 10 tokens maximum**\n"
+        "**Updates: Every 10 minutes**",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+def handle_view_watchlist(query, context, scheduler_service):
+    """Handle view watchlist"""
+    user_id = query.from_user.id
+    watchlist_data = scheduler_service.get_user_watchlist(user_id)
+    tokens = watchlist_data.get('tokens', [])
+    
+    if not tokens:
+        keyboard = [
+            [InlineKeyboardButton("➕ Add Token", callback_data='watchlist_add')],
+            [InlineKeyboardButton("🔙 Back", callback_data='watchlist_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        query.edit_message_text(
+            "📋 **Your Watchlist is Empty**\n\n"
+            "Add up to 10 tokens for automatic monitoring.\n"
+            "You'll receive notifications every 10 minutes when new signals appear.",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        return
+    
+    # Build watchlist display
+    message = "📋 **Your Watchlist** 📋\n\n"
+    
+    for i, token in enumerate(tokens, 1):
+        symbol = token['symbol']
+        timeframe = token['timeframe']
+        added_at = token.get('added_at', 'Unknown')
+        
+        message += f"{i}. **{symbol}** ({timeframe})\n"
+        if added_at != 'Unknown':
+            try:
+                from datetime import datetime
+                added_date = datetime.fromisoformat(added_at)
+                message += f"   Added: {added_date.strftime('%d/%m %H:%M')}\n"
+            except:
+                pass
+        message += "\n"
+    
+    notifications_enabled = watchlist_data.get('notifications_enabled', True)
+    notification_status = "🔔 ON" if notifications_enabled else "🔕 OFF"
+    message += f"🔔 Notifications: {notification_status}\n"
+    message += f"📊 Total: {len(tokens)}/10 tokens\n"
+    message += f"⏱️ Updates every 10 minutes"
+    
+    # Create management buttons
+    keyboard = [
+        [InlineKeyboardButton("➕ Add Token", callback_data='watchlist_add'),
+         InlineKeyboardButton("🗑️ Remove Token", callback_data='watchlist_remove')],
+        [InlineKeyboardButton(f"🔔 Toggle Notifications", callback_data='watchlist_toggle_notifications'),
+         InlineKeyboardButton("🧹 Clear All", callback_data='watchlist_clear')],
+        [InlineKeyboardButton("🔙 Back", callback_data='watchlist_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+
+def handle_remove_from_watchlist(query, context, scheduler_service):
+    """Handle remove from watchlist"""
+    user_id = query.from_user.id
+    watchlist_data = scheduler_service.get_user_watchlist(user_id)
+    tokens = watchlist_data.get('tokens', [])
+    
+    if not tokens:
+        query.edit_message_text("📋 Your watchlist is empty!")
+        return
+    
+    # Create removal buttons
+    keyboard = []
+    for token in tokens:
+        symbol = token['symbol']
+        timeframe = token['timeframe']
+        button_text = f"❌ {symbol} ({timeframe})"
+        callback_data = f"watchlist_remove_{symbol}_{timeframe}"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data='watchlist_view')])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    query.edit_message_text(
+        "🗑️ **Select token to remove:**",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+def handle_clear_watchlist(query, context, scheduler_service):
+    """Handle clear entire watchlist"""
+    user_id = query.from_user.id
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Yes, Clear All", callback_data='watchlist_confirm_clear'),
+         InlineKeyboardButton("❌ Cancel", callback_data='watchlist_view')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    query.edit_message_text(
+        "🧹 **Clear Entire Watchlist?**\n\n"
+        "This will remove all tokens from your watchlist.\n"
+        "This action cannot be undone.",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+def handle_toggle_notifications(query, context, scheduler_service):
+    """Handle toggle notifications"""
+    user_id = query.from_user.id
+    new_state = scheduler_service.toggle_notifications(user_id)
+    
+    status = "enabled" if new_state else "disabled"
+    emoji = "🔔" if new_state else "🔕"
+    
+    query.answer(f"Notifications {status}!")
+    
+    # Return to watchlist view
+    handle_view_watchlist(query, context, scheduler_service)
+
+def show_watchlist_menu(query, context):
+    """Show watchlist management menu"""
+    keyboard = [
+        [InlineKeyboardButton("➕ Add Token", callback_data='watchlist_add'),
+         InlineKeyboardButton("📋 View List", callback_data='watchlist_view')],
+        [InlineKeyboardButton("🗑️ Remove Token", callback_data='watchlist_remove'),
+         InlineKeyboardButton("🔔 Notifications", callback_data='watchlist_toggle_notifications')],
+        [InlineKeyboardButton("🔙 Back", callback_data='start')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    query.edit_message_text(
+        "👁️ **Watchlist Management** 👁️\n\n"
+        "**Features:**\n"
+        "• Monitor up to 10 tokens\n"
+        "• Auto-update every 10 minutes\n"
+        "• Instant signal notifications\n"
+        "• Hourly summary reports\n\n"
+        "Choose an action:",
+        reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
@@ -424,26 +606,6 @@ Select a pair to analyze:
     """
     
     query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
-
-def show_watchlist_menu(query, context):
-    """Show watchlist management menu"""
-    keyboard = [
-        [InlineKeyboardButton("➕ Add Token", callback_data='watchlist_add')],
-        [InlineKeyboardButton("📋 View List", callback_data='watchlist_view')],
-        [InlineKeyboardButton("🗑️ Remove Token", callback_data='watchlist_remove')],
-        [InlineKeyboardButton("🔙 Back", callback_data='start')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    query.edit_message_text(
-        "👁️ **Watchlist Management**\n\n"
-        "• Maximum 5 tokens\n"
-        "• Auto-update every hour\n"
-        "• Notifications for signals\n\n"
-        "Choose an action:",
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
 
 def show_help(query):
     """Show help information"""

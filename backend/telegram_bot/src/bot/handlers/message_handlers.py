@@ -25,12 +25,20 @@ def handle_message(update: Update, context: CallbackContext):
         # Clear the waiting state
         if user_id in context.bot_data['user_states']:
             del context.bot_data['user_states'][user_id]
+    elif user_state and user_state.get('waiting_for') == 'watchlist_token':
+        logger.info(f"Processing watchlist token for user {user_id}")
+        handle_watchlist_token_input(update, context, message_text)
+        # Clear the waiting state
+        if user_id in context.bot_data['user_states']:
+            del context.bot_data['user_states'][user_id]
     else:
         # Default response for unexpected messages
         update.message.reply_text(
             "🤖 **Use the menu buttons below or send /start to begin.**\n\n"
             "Available commands:\n"
-            "• /start - Main menu\n",
+            "• /start - Main menu\n"
+            "• /analysis [SYMBOL] [TIMEFRAME] - Quick analysis\n\n"
+            "Example: `/analysis BTC 4h`",
             parse_mode='Markdown'
         )
 
@@ -160,6 +168,82 @@ def handle_custom_token_input(update: Update, context: CallbackContext, token_in
             update.message.reply_text(
                 "❌ Critical error occurred. Please use /start to return to menu."
             )
+
+def handle_watchlist_token_input(update: Update, context: CallbackContext, token_input: str):
+    """Process watchlist token input from user"""
+    user_id = update.effective_user.id
+    logger.info(f"Processing watchlist token input: {token_input} for user {user_id}")
+    
+    try:
+        # Parse token input
+        symbol, timeframe = parse_token_input(token_input)
+        
+        if not symbol:
+            update.message.reply_text(
+                "❌ **Invalid token format!**\n\n"
+                "Please use: `BTC`, `BTC 1h`, or `BTC/USDT`\n"
+                "Use /start to return to menu.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Get scheduler service
+        if 'scheduler_service' not in context.bot_data:
+            from services.scheduler_service import SchedulerService
+            context.bot_data['scheduler_service'] = SchedulerService(None)
+        
+        scheduler_service = context.bot_data['scheduler_service']
+        
+        # Add to watchlist
+        success = scheduler_service.add_to_watchlist(user_id, symbol, timeframe)
+        
+        if success:
+            watchlist_data = scheduler_service.get_user_watchlist(user_id)
+            total_tokens = len(watchlist_data.get('tokens', []))
+            
+            update.message.reply_text(
+                f"✅ **Added {symbol} ({timeframe}) to watchlist!**\n\n"
+                f"📊 Total tokens: {total_tokens}/10\n"
+                f"🔔 You'll receive notifications every 10 minutes\n\n"
+                "Use /start to manage your watchlist.",
+                parse_mode='Markdown'
+            )
+        else:
+            # Check if limit exceeded or already exists
+            watchlist_data = scheduler_service.get_user_watchlist(user_id)
+            tokens = watchlist_data.get('tokens', [])
+            
+            # Check if already exists
+            exists = any(t['symbol'] == symbol and t['timeframe'] == timeframe for t in tokens)
+            
+            if exists:
+                update.message.reply_text(
+                    f"⚠️ **{symbol} ({timeframe}) is already in your watchlist!**\n\n"
+                    "Use /start to view your watchlist.",
+                    parse_mode='Markdown'
+                )
+            elif len(tokens) >= 10:
+                update.message.reply_text(
+                    f"❌ **Watchlist is full! (10/10)**\n\n"
+                    "Remove some tokens before adding new ones.\n"
+                    "Use /start to manage your watchlist.",
+                    parse_mode='Markdown'
+                )
+            else:
+                update.message.reply_text(
+                    f"❌ **Failed to add {symbol} to watchlist.**\n\n"
+                    "Please try again or use /start to return to menu.",
+                    parse_mode='Markdown'
+                )
+        
+    except Exception as e:
+        logger.error(f"Error processing watchlist token: {e}")
+        update.message.reply_text(
+            f"❌ **Error processing token:**\n"
+            f"{str(e)[:100]}...\n\n"
+            "Please try again or use /start to return to menu.",
+            parse_mode='Markdown'
+        )
 
 def parse_token_input(token_input: str):
     """Parse token input and return (symbol, timeframe)"""
