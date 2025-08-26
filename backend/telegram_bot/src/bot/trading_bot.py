@@ -41,7 +41,7 @@ class TradingBot:
         # Callback handlers
         self.dispatcher.add_handler(CallbackQueryHandler(handle_callback))
         
-        # Message handlers
+        # Message handlers - THIS IS IMPORTANT!
         self.dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
         
         # Error handler

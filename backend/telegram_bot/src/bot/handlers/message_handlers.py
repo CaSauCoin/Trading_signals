@@ -1,113 +1,78 @@
+import logging
+import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
-import sys
-import os
 
-# Add the correct path to AdvancedSMC
-current_dir = os.path.dirname(__file__)  # handlers directory
-src_dir = os.path.dirname(os.path.dirname(current_dir))  # src directory
-telegram_bot_dir = os.path.dirname(src_dir)  # telegram_bot directory
-backend_dir = os.path.dirname(telegram_bot_dir)  # backend directory
-advancedSMC_path = os.path.join(backend_dir, 'AdvancedSMC')
-sys.path.insert(0, advancedSMC_path)
-
-try:
-    from AdvancedSMC import AdvancedSMC
-    SMC_AVAILABLE = True
-    analysis_service = AdvancedSMC()
-except ImportError as e:
-    print(f"Warning: Could not import AdvancedSMC: {e}")
-    SMC_AVAILABLE = False
-    analysis_service = None
+logger = logging.getLogger(__name__)
 
 def handle_message(update: Update, context: CallbackContext):
     """Handle text messages from users"""
     user_id = update.effective_user.id
-    text = update.message.text.strip()
+    message_text = update.message.text.strip()
     
-    # Get user state from bot_data
+    # Initialize user states if not exists
     if not hasattr(context.bot_data, 'user_states'):
         context.bot_data['user_states'] = {}
     
-    user_state = context.bot_data['user_states'].get(user_id, {})
+    # Check if user is in a waiting state
+    user_state = context.bot_data['user_states'].get(user_id)
     
-    if user_state.get("waiting_for") == "custom_token":
-        process_custom_token(update, context, text)
-    elif user_state.get("waiting_for") == "watchlist_add":
-        process_watchlist_add(update, context, text)
+    if user_state and user_state.get('waiting_for') == 'custom_token':
+        handle_custom_token_input(update, context, message_text)
+        # Clear the waiting state
+        del context.bot_data['user_states'][user_id]
     else:
-        # Check if it looks like a token
-        if validate_token_format(text):
-            analyze_token_direct(update, context, text)
-        else:
-            update.message.reply_text(
-                "❓ Tôi không hiểu lệnh này.\n"
-                "Gửi /start để xem menu hoặc gửi tên token (VD: BTC hoặc BTC/USDT)"
-            )
-
-def process_custom_token(update: Update, context: CallbackContext, token_input: str):
-    """Process custom token input"""
-    user_id = update.effective_user.id
-    token_input = token_input.upper().strip()
-    
-    # Reset user state
-    reset_user_state(user_id, context)
-
-    if validate_token_format(token_input):
-        show_timeframe_selection(update, context, token_input)
-    else:
+        # Default response for unexpected messages
         update.message.reply_text(
-            "❌ **Format token không hợp lệ!**\n\n"
-            "✅ **Ví dụ hợp lệ:** BTC, BTC/USDT, PEPE\n\n"
-            "Vui lòng thử lại hoặc /start để quay về menu.",
+            "🤖 **Use the menu buttons below or send /start to begin.**\n\n"
+            "Available commands:\n"
+            "• /start - Main menu\n"
+            "• /analysis [SYMBOL] [TIMEFRAME] - Quick analysis\n\n"
+            "Example: `/analysis BTC/USDT 4h`",
             parse_mode='Markdown'
         )
 
-def process_watchlist_add(update: Update, context: CallbackContext, token_input: str):
-    """Process watchlist add token input"""
-    user_id = update.effective_user.id
-    token_input = token_input.upper().strip()
-    
-    # Reset user state
-    reset_user_state(user_id, context)
-    
-    if validate_token_format(token_input):
-        # Add to watchlist with default timeframe
-        add_to_watchlist(update, context, token_input, '4h')
-    else:
-        update.message.reply_text(
-            "❌ **Format token không hợp lệ!**\n\n"
-            "✅ **Ví dụ hợp lệ:** BTC, BTC/USDT, PEPE\n\n"
-            "Vui lòng thử lại.",
-            parse_mode='Markdown'
-        )
-
-def analyze_token_direct(update: Update, context: CallbackContext, symbol: str):
-    """Analyze token directly with default timeframe"""
-    analyze_token(update, context, symbol, '4h')
-
-def analyze_token(update: Update, context: CallbackContext, symbol: str, timeframe: str):
-    """Analyze token using AdvancedSMC"""
-    # Show loading message
-    loading_msg = update.message.reply_text(f"🔄 **Đang phân tích {symbol} {timeframe}...**", parse_mode='Markdown')
+def handle_custom_token_input(update: Update, context: CallbackContext, token_input: str):
+    """Process custom token input from user"""
+    logger.info(f"Processing custom token input: {token_input}")
     
     try:
-        # Check if analysis service is available
-        if not analysis_service:
-            loading_msg.edit_text(
-                f"❌ **Lỗi hệ thống**\n\n"
-                f"AdvancedSMC service không khả dụng.",
+        # Parse and validate token input
+        symbol, timeframe = parse_token_input(token_input)
+        
+        if not symbol:
+            update.message.reply_text(
+                "❌ **Invalid token format!**\n\n"
+                "Please use one of these formats:\n"
+                "• `BTC` (will use BTC/USDT)\n"
+                "• `BTC/USDT`\n"
+                "• `BTCUSDT`\n"
+                "• `BTC 1h` (with timeframe)\n"
+                "• `BTC/USDT 4h`\n\n"
+                "Try again or use /start to return to menu.",
                 parse_mode='Markdown'
             )
             return
+        
+        # Show processing message
+        processing_msg = update.message.reply_text(
+            f"🔄 **Analyzing {symbol} {timeframe}...**\n"
+            "Please wait while I fetch the data...",
+            parse_mode='Markdown'
+        )
+        
+        # Import analysis function from callback_handlers
+        from handlers.callback_handlers import analyze_with_smc, format_analysis_result
         
         # Perform analysis
         result = analyze_with_smc(symbol, timeframe)
         
         if result.get('error'):
-            loading_msg.edit_text(
-                f"❌ **Lỗi phân tích {symbol}**\n\n"
-                f"Chi tiết: {result.get('message', 'Unknown error')}",
+            processing_msg.edit_text(
+                f"❌ **Analysis failed for {symbol}:**\n"
+                f"{result.get('message', 'Unknown error')}\n\n"
+                "Please check the token symbol and try again.\n"
+                "Use /start to return to menu.",
                 parse_mode='Markdown'
             )
             return
@@ -115,149 +80,107 @@ def analyze_token(update: Update, context: CallbackContext, symbol: str, timefra
         # Format and send results
         formatted_result = format_analysis_result(result)
         
-        # Create action buttons
+        # Create timeframe buttons for further analysis
+        symbol_encoded = symbol.replace('/', '_')
         keyboard = [
-            [InlineKeyboardButton("➕ Thêm vào Watchlist", callback_data=f'watchlist_add_{symbol}_{timeframe}')],
-            [InlineKeyboardButton("🔄 Làm mới", callback_data=f'refresh_{symbol}_{timeframe}')],
-            [InlineKeyboardButton("⏱️ Đổi timeframe", callback_data=f'timeframe_{symbol}')],
-            [InlineKeyboardButton("🔙 Menu chính", callback_data='back_to_main')]
+            [InlineKeyboardButton("📊 15m", callback_data=f'tf_{symbol_encoded}_15m'),
+             InlineKeyboardButton("📊 1h", callback_data=f'tf_{symbol_encoded}_1h'),
+             InlineKeyboardButton("📊 4h", callback_data=f'tf_{symbol_encoded}_4h')],
+            [InlineKeyboardButton("📊 1d", callback_data=f'tf_{symbol_encoded}_1d'),
+             InlineKeyboardButton("📊 3d", callback_data=f'tf_{symbol_encoded}_3d'),
+             InlineKeyboardButton("📊 1w", callback_data=f'tf_{symbol_encoded}_1w')],
+            [InlineKeyboardButton("🔄 Refresh", callback_data=f'tf_{symbol_encoded}_{timeframe}'),
+             InlineKeyboardButton("🏠 Menu", callback_data='start')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        loading_msg.edit_text(formatted_result, reply_markup=reply_markup, parse_mode='Markdown')
+        # Send results
+        try:
+            processing_msg.edit_text(
+                formatted_result, 
+                reply_markup=reply_markup, 
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Markdown error: {e}")
+            # Fallback without markdown
+            plain_message = formatted_result.replace('*', '').replace('_', '')
+            processing_msg.edit_text(plain_message, reply_markup=reply_markup)
+        
+        logger.info(f"Successfully analyzed custom token: {symbol}")
         
     except Exception as e:
-        loading_msg.edit_text(
-            f"❌ **Lỗi phân tích {symbol}**\n\n"
-            f"Chi tiết: {str(e)}",
+        logger.error(f"Error processing custom token: {e}")
+        update.message.reply_text(
+            f"❌ **Error processing your request:**\n"
+            f"{str(e)[:100]}...\n\n"
+            "Please try again or use /start to return to menu.",
             parse_mode='Markdown'
         )
 
-def analyze_with_smc(symbol: str, timeframe: str):
-    """Analyze symbol using AdvancedSMC"""
-    try:
-        if not analysis_service:
-            return {
-                'error': True,
-                'message': 'AdvancedSMC service not available'
-            }
-        
-        # Normalize symbol format
-        if '/' not in symbol and not symbol.endswith('USDT'):
-            symbol = f"{symbol}USDT"
-        elif '/' in symbol:
-            symbol = symbol.replace('/', '')
-        
-        # Mock analysis result - replace with actual AdvancedSMC calls
-        result = {
-            'error': False,
-            'symbol': symbol,
-            'timeframe': timeframe,
-            'analysis': {
-                'signal': {'signal': 'BUY', 'confidence': 75},
-                'order_blocks': {'status': 'Bullish OB found'},
-                'fair_value_gaps': {'status': 'FVG detected'},
-                'break_of_structure': {'status': 'BOS confirmed'},
-                'liquidity_zones': {'status': 'Liquidity swept'},
-                'timestamp': '2025-08-26T15:30:00'
-            }
-        }
-        
-        return result
-        
-    except Exception as e:
-        return {
-            'error': True,
-            'message': f'Analysis failed: {str(e)}'
-        }
-
-def show_timeframe_selection(update: Update, context: CallbackContext, symbol: str):
-    """Show timeframe selection for analysis"""
-    keyboard = [
-        [InlineKeyboardButton("15m", callback_data=f'analyze_{symbol}_15m'),
-         InlineKeyboardButton("1h", callback_data=f'analyze_{symbol}_1h')],
-        [InlineKeyboardButton("4h", callback_data=f'analyze_{symbol}_4h'),
-         InlineKeyboardButton("1d", callback_data=f'analyze_{symbol}_1d')],
-        [InlineKeyboardButton("3d", callback_data=f'analyze_{symbol}_3d'),
-         InlineKeyboardButton("1w", callback_data=f'analyze_{symbol}_1w')],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data='back_to_main')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+def parse_token_input(token_input: str):
+    """Parse token input and return (symbol, timeframe)"""
+    token_input = token_input.upper().strip()
     
-    update.message.reply_text(
-        f"⏱️ **Chọn timeframe cho {symbol}:**",
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
-
-def add_to_watchlist(update: Update, context: CallbackContext, symbol: str, timeframe: str):
-    """Add token to user watchlist"""
-    update.message.reply_text(
-        f"✅ **Đã thêm {symbol} ({timeframe}) vào watchlist!**\n\n"
-        "📋 Sử dụng /start → Watchlist để quản lý danh sách theo dõi.",
-        parse_mode='Markdown'
-    )
-
-def format_analysis_result(result: dict) -> str:
-    """Format analysis results for display"""
-    if result.get('error'):
-        return f"❌ **Lỗi:** {result.get('message')}"
+    # Common timeframe patterns
+    timeframe_pattern = r'\b(1M|3M|5M|15M|30M|1H|2H|4H|6H|8H|12H|1D|3D|1W|1M)\b'
     
-    symbol = result.get('symbol', 'Unknown')
-    timeframe = result.get('timeframe', '4h')
-    analysis = result.get('analysis', {})
+    # Extract timeframe if present
+    timeframe_match = re.search(timeframe_pattern, token_input)
+    timeframe = timeframe_match.group(1).lower() if timeframe_match else '4h'
     
-    # Extract analysis data
-    signal = analysis.get('signal', {})
-    order_blocks = analysis.get('order_blocks', {})
-    fvg = analysis.get('fair_value_gaps', {})
-    bos = analysis.get('break_of_structure', {})
-    liquidity = analysis.get('liquidity_zones', {})
+    # Remove timeframe from input to get clean symbol
+    symbol_part = re.sub(timeframe_pattern, '', token_input).strip()
     
-    # Format signal emoji
-    signal_emoji = "🟢" if signal.get('signal') == 'BUY' else "🔴" if signal.get('signal') == 'SELL' else "🟡"
+    # Normalize symbol formats
+    symbol = normalize_symbol(symbol_part)
     
-    # Format the message
-    formatted_msg = f"""
-📊 **Phân tích SMC: {symbol} ({timeframe})**
+    return symbol, timeframe
 
-{signal_emoji} **Tín hiệu:** {signal.get('signal', 'NEUTRAL')}
-📈 **Độ tin cậy:** {signal.get('confidence', 0)}%
-
-🔲 **Order Blocks:** {order_blocks.get('status', 'N/A')}
-⚡ **Fair Value Gaps:** {fvg.get('status', 'N/A')}
-📊 **Break of Structure:** {bos.get('status', 'N/A')}
-💧 **Liquidity Zones:** {liquidity.get('status', 'N/A')}
-
-⏰ **Cập nhật:** {analysis.get('timestamp', 'N/A')}
-
-⚠️ *Chỉ mang tính chất tham khảo, không phải lời khuyên đầu tư.*
-    """
+def normalize_symbol(symbol_input: str):
+    """Normalize symbol to standard format"""
+    if not symbol_input:
+        return None
     
-    return formatted_msg.strip()
-
-def reset_user_state(user_id: int, context):
-    """Reset user state"""
-    if not hasattr(context.bot_data, 'user_states'):
-        context.bot_data['user_states'] = {}
+    symbol_input = symbol_input.upper().replace(' ', '')
     
-    context.bot_data['user_states'][user_id] = {"waiting_for": None}
+    # If already in SYMBOL/USDT format
+    if '/' in symbol_input:
+        parts = symbol_input.split('/')
+        if len(parts) == 2:
+            base, quote = parts
+            # Validate base symbol (3-10 characters, alphanumeric)
+            if re.match(r'^[A-Z0-9]{1,10}$', base) and quote in ['USDT', 'BTC', 'ETH', 'BNB']:
+                return f"{base}/{quote}"
+    
+    # If in SYMBOLUSDT format
+    if symbol_input.endswith('USDT') and len(symbol_input) > 4:
+        base = symbol_input[:-4]
+        if re.match(r'^[A-Z0-9]{1,10}$', base):
+            return f"{base}/USDT"
+    
+    # If just symbol (assume USDT pair)
+    if re.match(r'^[A-Z0-9]{1,10}$', symbol_input):
+        return f"{symbol_input}/USDT"
+    
+    # Invalid format
+    return None
 
-def validate_token_format(token: str) -> bool:
-    """Validate token format"""
-    if not token:
+def validate_token_symbol(symbol: str):
+    """Validate if token symbol is potentially valid"""
+    if not symbol:
         return False
     
-    token = token.upper().strip()
+    # Remove / and check if base symbol is reasonable
+    base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
     
-    # Check for pair format (e.g., BTC/USDT)
-    if '/' in token:
-        parts = token.split('/')
-        if len(parts) == 2 and all(part.isalpha() and len(part) >= 2 for part in parts):
-            return True
+    # Should be 1-10 characters, alphanumeric
+    if not re.match(r'^[A-Z0-9]{1,10}$', base_symbol):
+        return False
     
-    # Check for single token format (e.g., BTC)
-    if token.isalpha() and 2 <= len(token) <= 10:
-        return True
+    # Common invalid patterns
+    invalid_patterns = ['TEST', 'FAKE', 'SCAM']
+    if base_symbol in invalid_patterns:
+        return False
     
-    return False
+    return True

@@ -70,12 +70,23 @@ def handle_callback(update: Update, context: CallbackContext):
 def handle_custom_token_callback(query, context, user_id):
     """Handle custom token input callback"""
     context.bot_data['user_states'][user_id] = {"waiting_for": "custom_token"}
+    
+    # Add a back button for better UX
+    keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data='start')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     query.edit_message_text(
         "✏️ **Enter Custom Token**\n\n"
-        "Send the token name you want to analyze:\n"
-        "• Example: BTC, ETH, PEPE\n"
-        "• Or pair: BTC/USDT, ETH/USDT\n\n"
-        "💡 Supports all tokens on Binance!",
+        "Send the token name you want to analyze:\n\n"
+        "**Examples:**\n"
+        "• `BTC` → Will analyze BTC/USDT 4h\n"
+        "• `ETH 1h` → Will analyze ETH/USDT 1h\n"
+        "• `PEPE/USDT` → Will analyze PEPE/USDT 4h\n"
+        "• `SOL 1d` → Will analyze SOL/USDT 1d\n\n"
+        "**Supported timeframes:**\n"
+        "`15m`, `1h`, `4h`, `1d`, `3d`, `1w`\n\n"
+        "💡 **Supports all tokens on Binance!**",
+        reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
