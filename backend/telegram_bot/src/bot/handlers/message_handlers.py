@@ -15,23 +15,28 @@ def handle_message(update: Update, context: CallbackContext):
     # Initialize user states if not exists
     if not hasattr(context.bot_data, 'user_states'):
         context.bot_data['user_states'] = {}
+        logger.info("Initialized user_states in bot_data")
     
     # Check if user is in a waiting state
     user_state = context.bot_data['user_states'].get(user_id)
+    logger.info(f"User {user_id} state: {user_state}")
     
     if user_state and user_state.get('waiting_for') == 'custom_token':
-        logger.info(f"Processing custom token for user {user_id}")
+        logger.info(f"Processing custom token for user {user_id}: {message_text}")
         handle_custom_token_input(update, context, message_text)
         # Clear the waiting state
         if user_id in context.bot_data['user_states']:
             del context.bot_data['user_states'][user_id]
+            logger.info(f"Cleared custom_token state for user {user_id}")
     elif user_state and user_state.get('waiting_for') == 'watchlist_token':
-        logger.info(f"Processing watchlist token for user {user_id}")
+        logger.info(f"Processing watchlist token for user {user_id}: {message_text}")
         handle_watchlist_token_input(update, context, message_text)
         # Clear the waiting state
         if user_id in context.bot_data['user_states']:
             del context.bot_data['user_states'][user_id]
+            logger.info(f"Cleared watchlist_token state for user {user_id}")
     else:
+        logger.info(f"No matching state for user {user_id}, showing default response")
         # Default response for unexpected messages
         update.message.reply_text(
             "🤖 **Use the menu buttons below or send /start to begin.**\n\n"
@@ -39,6 +44,92 @@ def handle_message(update: Update, context: CallbackContext):
             "• /start - Main menu\n"
             "• /analysis [SYMBOL] [TIMEFRAME] - Quick analysis\n\n"
             "Example: `/analysis BTC 4h`",
+            parse_mode='Markdown'
+        )
+
+def handle_watchlist_token_input(update: Update, context: CallbackContext, token_input: str):
+    """Process watchlist token input from user"""
+    user_id = update.effective_user.id
+    logger.info(f"Processing watchlist token input: '{token_input}' for user {user_id}")
+    
+    try:
+        # Parse token input
+        symbol, timeframe = parse_token_input(token_input)
+        logger.info(f"Parsed - Symbol: {symbol}, Timeframe: {timeframe}")
+        
+        if not symbol:
+            logger.warning(f"Invalid symbol format for input: {token_input}")
+            update.message.reply_text(
+                "❌ **Invalid token format!**\n\n"
+                "Please use: `BTC`, `BTC 1h`, or `BTC/USDT`\n"
+                "Use /start to return to menu.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Get or create scheduler service
+        if 'scheduler_service' not in context.bot_data:
+            logger.info("Creating new scheduler service instance")
+            from services.scheduler_service import SchedulerService
+            context.bot_data['scheduler_service'] = SchedulerService(None)
+        
+        scheduler_service = context.bot_data['scheduler_service']
+        logger.info(f"Got scheduler service: {type(scheduler_service)}")
+        
+        # Add to watchlist
+        logger.info(f"Attempting to add {symbol} {timeframe} to watchlist for user {user_id}")
+        success = scheduler_service.add_to_watchlist(user_id, symbol, timeframe)
+        logger.info(f"Add to watchlist result: {success}")
+        
+        if success:
+            watchlist_data = scheduler_service.get_user_watchlist(user_id)
+            total_tokens = len(watchlist_data.get('tokens', []))
+            
+            logger.info(f"Successfully added {symbol} to watchlist. Total tokens: {total_tokens}")
+            update.message.reply_text(
+                f"✅ **Added {symbol} ({timeframe}) to watchlist!**\n\n"
+                f"📊 Total tokens: {total_tokens}/10\n"
+                f"🔔 You'll receive notifications every 10 minutes\n\n"
+                "Use /start to manage your watchlist.",
+                parse_mode='Markdown'
+            )
+        else:
+            # Check if limit exceeded or already exists
+            watchlist_data = scheduler_service.get_user_watchlist(user_id)
+            tokens = watchlist_data.get('tokens', [])
+            
+            # Check if already exists
+            exists = any(t['symbol'] == symbol and t['timeframe'] == timeframe for t in tokens)
+            
+            if exists:
+                logger.info(f"{symbol} {timeframe} already exists in watchlist")
+                update.message.reply_text(
+                    f"⚠️ **{symbol} ({timeframe}) is already in your watchlist!**\n\n"
+                    "Use /start to view your watchlist.",
+                    parse_mode='Markdown'
+                )
+            elif len(tokens) >= 10:
+                logger.info(f"Watchlist full for user {user_id}: {len(tokens)}/10")
+                update.message.reply_text(
+                    f"❌ **Watchlist is full! (10/10)**\n\n"
+                    "Remove some tokens before adding new ones.\n"
+                    "Use /start to manage your watchlist.",
+                    parse_mode='Markdown'
+                )
+            else:
+                logger.error(f"Unknown error adding {symbol} to watchlist")
+                update.message.reply_text(
+                    f"❌ **Failed to add {symbol} to watchlist.**\n\n"
+                    "Please try again or use /start to return to menu.",
+                    parse_mode='Markdown'
+                )
+        
+    except Exception as e:
+        logger.error(f"Error processing watchlist token: {e}", exc_info=True)
+        update.message.reply_text(
+            f"❌ **Error processing token:**\n"
+            f"{str(e)[:100]}...\n\n"
+            "Please try again or use /start to return to menu.",
             parse_mode='Markdown'
         )
 
@@ -169,86 +260,10 @@ def handle_custom_token_input(update: Update, context: CallbackContext, token_in
                 "❌ Critical error occurred. Please use /start to return to menu."
             )
 
-def handle_watchlist_token_input(update: Update, context: CallbackContext, token_input: str):
-    """Process watchlist token input from user"""
-    user_id = update.effective_user.id
-    logger.info(f"Processing watchlist token input: {token_input} for user {user_id}")
-    
-    try:
-        # Parse token input
-        symbol, timeframe = parse_token_input(token_input)
-        
-        if not symbol:
-            update.message.reply_text(
-                "❌ **Invalid token format!**\n\n"
-                "Please use: `BTC`, `BTC 1h`, or `BTC/USDT`\n"
-                "Use /start to return to menu.",
-                parse_mode='Markdown'
-            )
-            return
-        
-        # Get scheduler service
-        if 'scheduler_service' not in context.bot_data:
-            from services.scheduler_service import SchedulerService
-            context.bot_data['scheduler_service'] = SchedulerService(None)
-        
-        scheduler_service = context.bot_data['scheduler_service']
-        
-        # Add to watchlist
-        success = scheduler_service.add_to_watchlist(user_id, symbol, timeframe)
-        
-        if success:
-            watchlist_data = scheduler_service.get_user_watchlist(user_id)
-            total_tokens = len(watchlist_data.get('tokens', []))
-            
-            update.message.reply_text(
-                f"✅ **Added {symbol} ({timeframe}) to watchlist!**\n\n"
-                f"📊 Total tokens: {total_tokens}/10\n"
-                f"🔔 You'll receive notifications every 10 minutes\n\n"
-                "Use /start to manage your watchlist.",
-                parse_mode='Markdown'
-            )
-        else:
-            # Check if limit exceeded or already exists
-            watchlist_data = scheduler_service.get_user_watchlist(user_id)
-            tokens = watchlist_data.get('tokens', [])
-            
-            # Check if already exists
-            exists = any(t['symbol'] == symbol and t['timeframe'] == timeframe for t in tokens)
-            
-            if exists:
-                update.message.reply_text(
-                    f"⚠️ **{symbol} ({timeframe}) is already in your watchlist!**\n\n"
-                    "Use /start to view your watchlist.",
-                    parse_mode='Markdown'
-                )
-            elif len(tokens) >= 10:
-                update.message.reply_text(
-                    f"❌ **Watchlist is full! (10/10)**\n\n"
-                    "Remove some tokens before adding new ones.\n"
-                    "Use /start to manage your watchlist.",
-                    parse_mode='Markdown'
-                )
-            else:
-                update.message.reply_text(
-                    f"❌ **Failed to add {symbol} to watchlist.**\n\n"
-                    "Please try again or use /start to return to menu.",
-                    parse_mode='Markdown'
-                )
-        
-    except Exception as e:
-        logger.error(f"Error processing watchlist token: {e}")
-        update.message.reply_text(
-            f"❌ **Error processing token:**\n"
-            f"{str(e)[:100]}...\n\n"
-            "Please try again or use /start to return to menu.",
-            parse_mode='Markdown'
-        )
-
 def parse_token_input(token_input: str):
     """Parse token input and return (symbol, timeframe)"""
     token_input = token_input.upper().strip()
-    logger.info(f"Parsing token input: {token_input}")
+    logger.info(f"Parsing token input: '{token_input}'")
     
     # Common timeframe patterns (fixed regex)
     timeframe_pattern = r'\b(15M|30M|1H|2H|4H|6H|8H|12H|1D|3D|1W)\b'
@@ -260,7 +275,7 @@ def parse_token_input(token_input: str):
     
     # Remove timeframe from input to get clean symbol
     symbol_part = re.sub(timeframe_pattern, '', token_input).strip()
-    logger.info(f"Symbol part after timeframe removal: {symbol_part}")
+    logger.info(f"Symbol part after timeframe removal: '{symbol_part}'")
     
     # Normalize symbol formats
     symbol = normalize_symbol(symbol_part)
@@ -275,7 +290,7 @@ def normalize_symbol(symbol_input: str):
         return None
     
     symbol_input = symbol_input.upper().replace(' ', '')
-    logger.info(f"Normalizing symbol: {symbol_input}")
+    logger.info(f"Normalizing symbol: '{symbol_input}'")
     
     # If already in SYMBOL/USDT format
     if '/' in symbol_input:
@@ -303,7 +318,7 @@ def normalize_symbol(symbol_input: str):
         return result
     
     # Invalid format
-    logger.warning(f"Invalid symbol format: {symbol_input}")
+    logger.warning(f"Invalid symbol format: '{symbol_input}'")
     return None
 
 def validate_token_symbol(symbol: str):
