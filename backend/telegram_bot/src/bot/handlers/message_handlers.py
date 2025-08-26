@@ -10,6 +10,8 @@ def handle_message(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     message_text = update.message.text.strip()
     
+    logger.info(f"User {user_id} sent message: {message_text}")
+    
     # Initialize user states if not exists
     if not hasattr(context.bot_data, 'user_states'):
         context.bot_data['user_states'] = {}
@@ -18,9 +20,11 @@ def handle_message(update: Update, context: CallbackContext):
     user_state = context.bot_data['user_states'].get(user_id)
     
     if user_state and user_state.get('waiting_for') == 'custom_token':
+        logger.info(f"Processing custom token for user {user_id}")
         handle_custom_token_input(update, context, message_text)
         # Clear the waiting state
-        del context.bot_data['user_states'][user_id]
+        if user_id in context.bot_data['user_states']:
+            del context.bot_data['user_states'][user_id]
     else:
         # Default response for unexpected messages
         update.message.reply_text(
@@ -28,7 +32,7 @@ def handle_message(update: Update, context: CallbackContext):
             "Available commands:\n"
             "• /start - Main menu\n"
             "• /analysis [SYMBOL] [TIMEFRAME] - Quick analysis\n\n"
-            "Example: `/analysis BTC/USDT 4h`",
+            "Example: `/analysis BTC 4h`",
             parse_mode='Markdown'
         )
 
@@ -39,8 +43,10 @@ def handle_custom_token_input(update: Update, context: CallbackContext, token_in
     try:
         # Parse and validate token input
         symbol, timeframe = parse_token_input(token_input)
+        logger.info(f"Parsed symbol: {symbol}, timeframe: {timeframe}")
         
         if not symbol:
+            logger.warning(f"Invalid symbol format: {token_input}")
             update.message.reply_text(
                 "❌ **Invalid token format!**\n\n"
                 "Please use one of these formats:\n"
@@ -61,16 +67,46 @@ def handle_custom_token_input(update: Update, context: CallbackContext, token_in
             parse_mode='Markdown'
         )
         
-        # Import analysis function from callback_handlers
+        # Check if analysis service is available first
+        logger.info("Checking analysis service availability...")
+        try:
+            from handlers.callback_handlers import analysis_service
+            if not analysis_service:
+                logger.error("Analysis service not available")
+                processing_msg.edit_text(
+                    "❌ **Analysis service not available**\n\n"
+                    "Please try again later or contact support.\n"
+                    "Use /start to return to menu.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            logger.info(f"Analysis service available: {type(analysis_service)}")
+        except ImportError as e:
+            logger.error(f"Import error: {e}")
+            processing_msg.edit_text(
+                "❌ **System error: Cannot import analysis service**\n\n"
+                "Please try again later.\n"
+                "Use /start to return to menu.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Import analysis functions
+        logger.info("Importing analysis functions...")
         from handlers.callback_handlers import analyze_with_smc, format_analysis_result
         
-        # Perform analysis
+        # Perform analysis with timeout protection
+        logger.info(f"Starting analysis for {symbol} {timeframe}")
         result = analyze_with_smc(symbol, timeframe)
+        logger.info(f"Analysis completed. Error: {result.get('error', False)}")
         
         if result.get('error'):
+            error_msg = result.get('message', 'Unknown error')
+            logger.error(f"Analysis failed: {error_msg}")
             processing_msg.edit_text(
                 f"❌ **Analysis failed for {symbol}:**\n"
-                f"{result.get('message', 'Unknown error')}\n\n"
+                f"{error_msg}\n\n"
                 "Please check the token symbol and try again.\n"
                 "Use /start to return to menu.",
                 parse_mode='Markdown'
@@ -78,6 +114,7 @@ def handle_custom_token_input(update: Update, context: CallbackContext, token_in
             return
         
         # Format and send results
+        logger.info("Formatting analysis results...")
         formatted_result = format_analysis_result(result)
         
         # Create timeframe buttons for further analysis
@@ -96,11 +133,13 @@ def handle_custom_token_input(update: Update, context: CallbackContext, token_in
         
         # Send results
         try:
+            logger.info("Sending formatted results...")
             processing_msg.edit_text(
                 formatted_result, 
                 reply_markup=reply_markup, 
                 parse_mode='Markdown'
             )
+            logger.info("Results sent successfully")
         except Exception as e:
             logger.error(f"Markdown error: {e}")
             # Fallback without markdown
@@ -110,60 +149,79 @@ def handle_custom_token_input(update: Update, context: CallbackContext, token_in
         logger.info(f"Successfully analyzed custom token: {symbol}")
         
     except Exception as e:
-        logger.error(f"Error processing custom token: {e}")
-        update.message.reply_text(
-            f"❌ **Error processing your request:**\n"
-            f"{str(e)[:100]}...\n\n"
-            "Please try again or use /start to return to menu.",
-            parse_mode='Markdown'
-        )
+        logger.error(f"Error processing custom token: {e}", exc_info=True)
+        try:
+            update.message.reply_text(
+                f"❌ **Error processing your request:**\n"
+                f"{str(e)[:100]}...\n\n"
+                "Please try again or use /start to return to menu.",
+                parse_mode='Markdown'
+            )
+        except:
+            # If even the error message fails
+            update.message.reply_text(
+                "❌ Critical error occurred. Please use /start to return to menu."
+            )
 
 def parse_token_input(token_input: str):
     """Parse token input and return (symbol, timeframe)"""
     token_input = token_input.upper().strip()
+    logger.info(f"Parsing token input: {token_input}")
     
-    # Common timeframe patterns
-    timeframe_pattern = r'\b(1M|3M|5M|15M|30M|1H|2H|4H|6H|8H|12H|1D|3D|1W|1M)\b'
+    # Common timeframe patterns (fixed regex)
+    timeframe_pattern = r'\b(15M|30M|1H|2H|4H|6H|8H|12H|1D|3D|1W)\b'
     
     # Extract timeframe if present
     timeframe_match = re.search(timeframe_pattern, token_input)
     timeframe = timeframe_match.group(1).lower() if timeframe_match else '4h'
+    logger.info(f"Extracted timeframe: {timeframe}")
     
     # Remove timeframe from input to get clean symbol
     symbol_part = re.sub(timeframe_pattern, '', token_input).strip()
+    logger.info(f"Symbol part after timeframe removal: {symbol_part}")
     
     # Normalize symbol formats
     symbol = normalize_symbol(symbol_part)
+    logger.info(f"Normalized symbol: {symbol}")
     
     return symbol, timeframe
 
 def normalize_symbol(symbol_input: str):
     """Normalize symbol to standard format"""
     if not symbol_input:
+        logger.warning("Empty symbol input")
         return None
     
     symbol_input = symbol_input.upper().replace(' ', '')
+    logger.info(f"Normalizing symbol: {symbol_input}")
     
     # If already in SYMBOL/USDT format
     if '/' in symbol_input:
         parts = symbol_input.split('/')
         if len(parts) == 2:
             base, quote = parts
-            # Validate base symbol (3-10 characters, alphanumeric)
+            # Validate base symbol (1-10 characters, alphanumeric)
             if re.match(r'^[A-Z0-9]{1,10}$', base) and quote in ['USDT', 'BTC', 'ETH', 'BNB']:
-                return f"{base}/{quote}"
+                result = f"{base}/{quote}"
+                logger.info(f"Symbol format valid: {result}")
+                return result
     
     # If in SYMBOLUSDT format
     if symbol_input.endswith('USDT') and len(symbol_input) > 4:
         base = symbol_input[:-4]
         if re.match(r'^[A-Z0-9]{1,10}$', base):
-            return f"{base}/USDT"
+            result = f"{base}/USDT"
+            logger.info(f"Converted SYMBOLUSDT to {result}")
+            return result
     
     # If just symbol (assume USDT pair)
     if re.match(r'^[A-Z0-9]{1,10}$', symbol_input):
-        return f"{symbol_input}/USDT"
+        result = f"{symbol_input}/USDT"
+        logger.info(f"Added /USDT to symbol: {result}")
+        return result
     
     # Invalid format
+    logger.warning(f"Invalid symbol format: {symbol_input}")
     return None
 
 def validate_token_symbol(symbol: str):
