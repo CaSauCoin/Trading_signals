@@ -389,48 +389,38 @@ def handle_watchlist_callback(query, context, data):
     """Handle watchlist related callbacks"""
     user_id = query.from_user.id
     
-    # Get scheduler service - FIX IMPORT PATH
-    try:
-        if 'scheduler_service' not in context.bot_data:
-            logger.info("Creating scheduler service instance")
-            try:
-                # Import from services directory 
-                import sys
-                import os
-                
-                # Add services directory to Python path
-                services_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'services')
-                if services_path not in sys.path:
-                    sys.path.insert(0, services_path)
-                    logger.info(f"Added services path: {services_path}")
-                
-                from scheduler_service import SchedulerService
-                context.bot_data['scheduler_service'] = SchedulerService(None)
-                logger.info("Successfully created scheduler service")
-            except ImportError as e:
-                logger.error(f"Failed to import SchedulerService: {e}")
-                # Try alternative import
-                try:
-                    from services.scheduler_service import SchedulerService
-                    context.bot_data['scheduler_service'] = SchedulerService(None)
-                    logger.info("Successfully imported using services.scheduler_service")
-                except ImportError as e2:
-                    logger.error(f"Alternative import also failed: {e2}")
-                    query.edit_message_text(
-                        "❌ **Watchlist service temporarily unavailable.**\n\n"
-                        "Please try again later or use /start to return to menu."
-                    )
-                    return
+    # Get SHARED scheduler service from bot_data (already correct)
+    scheduler_service = context.bot_data.get('scheduler_service')
+    
+    if not scheduler_service:
+        logger.error("Scheduler service not found in bot_data")
+        logger.info(f"Available bot_data keys: {list(context.bot_data.keys())}")
         
-        scheduler_service = context.bot_data['scheduler_service']
-        
-    except Exception as e:
-        logger.error(f"Error importing scheduler service: {e}")
-        query.edit_message_text(
-            "❌ **Watchlist service temporarily unavailable.**\n\n"
-            "Please try again later or use /start to return to menu."
-        )
-        return
+        # FALLBACK: Try to create scheduler service
+        try:
+            import sys
+            import os
+            
+            # Add services to path
+            current_dir = os.path.dirname(__file__)
+            services_path = os.path.join(os.path.dirname(os.path.dirname(current_dir)), 'services')
+            if services_path not in sys.path:
+                sys.path.insert(0, services_path)
+            
+            from scheduler_service import SchedulerService
+            scheduler_service = SchedulerService(None)
+            context.bot_data['scheduler_service'] = scheduler_service
+            logger.warning("Created fallback scheduler service")
+            
+        except Exception as e:
+            logger.error(f"Failed to create fallback scheduler service: {e}")
+            query.edit_message_text(
+                "❌ **Watchlist service temporarily unavailable.**\n\n"
+                "Please try again later or use /start to return to menu."
+            )
+            return
+    
+    logger.info(f"Using scheduler service with {len(scheduler_service.user_watchlists)} users")
     
     # Route watchlist callbacks
     if data == 'watchlist_add':
@@ -453,6 +443,42 @@ def handle_watchlist_callback(query, context, data):
         confirm_clear_watchlist(query, context, scheduler_service)
     else:
         query.edit_message_text("🚧 Watchlist feature under development...")
+
+def remove_symbol_from_watchlist(query, context, scheduler_service, symbol, timeframe):
+    """Remove specific symbol from watchlist"""
+    user_id = query.from_user.id
+    
+    success = scheduler_service.remove_from_watchlist(user_id, symbol, timeframe)
+    
+    if success:
+        query.answer(f"Removed {symbol} ({timeframe})")
+        # Return to watchlist view
+        handle_view_watchlist(query, context, scheduler_service)
+    else:
+        query.edit_message_text(
+            f"❌ **Failed to remove {symbol} ({timeframe})**\n\n"
+            "Token may not exist in your watchlist.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='watchlist_view')]])
+        )
+
+def confirm_clear_watchlist(query, context, scheduler_service):
+    """Confirm clear entire watchlist"""
+    user_id = query.from_user.id
+    
+    success = scheduler_service.clear_watchlist(user_id)
+    
+    if success:
+        query.edit_message_text(
+            "✅ **Watchlist cleared successfully!**\n\n"
+            "All tokens have been removed from your watchlist.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data='watchlist_menu')]])
+        )
+    else:
+        query.edit_message_text(
+            "❌ **Failed to clear watchlist**\n\n"
+            "Your watchlist may already be empty.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data='watchlist_view')]])
+        )
 
 def handle_add_to_watchlist(query, context, scheduler_service):
     """Handle add to watchlist"""

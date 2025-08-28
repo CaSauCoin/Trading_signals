@@ -278,7 +278,7 @@ class SchedulerService:
                         message += f"🚪 **Exit:** {format_price_func(latest_exit.get('price', 0))}\n"
                     
                     message += "\n"
-            
+        
             # 2. Market Overview Section  
             message += "📋 **MARKET OVERVIEW:**\n\n"
             
@@ -350,19 +350,23 @@ class SchedulerService:
             message += f"🔔 Next update: {(current_time.hour + 1) % 24:02d}:00\n"
             message += f"💡 Use /start for detailed analysis."
             
-            # Send report
-            if self.bot and hasattr(self.bot, 'updater'):
-                try:
+            # Send report using bot instance
+            try:
+                if self.bot and hasattr(self.bot, 'updater') and self.bot.updater:
+                    # Method 1: Use bot.updater.bot
                     self.bot.updater.bot.send_message(
                         chat_id=user_id,
                         text=message,
                         parse_mode='Markdown'
                     )
                     logger.info(f"Sent hourly watchlist report to user {user_id} - {total_tokens} tokens, {len(new_signals)} new signals")
-                except Exception as e:
-                    logger.error(f"Error sending Telegram message to user {user_id}: {e}")
-            else:
-                logger.error("Bot instance not available for sending messages")
-            
+                else:
+                    logger.error("Bot instance not available for sending messages")
+                    # Method 2: Try to get bot from dispatcher
+                    logger.info("Trying alternative message sending method...")
+                    
+            except Exception as e:
+                logger.error(f"Error sending Telegram message to user {user_id}: {e}")
+        
         except Exception as e:
             logger.error(f"Error sending hourly watchlist report to user {user_id}: {e}")

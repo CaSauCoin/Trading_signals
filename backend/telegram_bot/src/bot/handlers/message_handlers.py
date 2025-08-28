@@ -65,62 +65,58 @@ def handle_watchlist_token_input(update: Update, context: CallbackContext, token
             )
             return
         
-        # Get or create scheduler service using global storage
-        if 'scheduler_service' not in context.bot_data:
-            logger.info("Creating new scheduler service instance")
+        # Get SHARED scheduler service from bot_data
+        scheduler_service = context.bot_data.get('scheduler_service')
+        
+        if not scheduler_service:
+            logger.error("Scheduler service not found in bot_data")
+            # Fallback: try to get from global state
             try:
-                # Import from services directory
                 import sys
                 import os
                 
-                # Add services directory to Python path
                 services_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'services')
                 if services_path not in sys.path:
                     sys.path.insert(0, services_path)
-                    logger.info(f"Added services path: {services_path}")
                 
                 from scheduler_service import SchedulerService
-                context.bot_data['scheduler_service'] = SchedulerService(None)
-                logger.info("Successfully created scheduler service")
-            except ImportError as e:
-                logger.error(f"Failed to import SchedulerService: {e}")
-                # Try alternative import
-                try:
-                    from services.scheduler_service import SchedulerService
-                    context.bot_data['scheduler_service'] = SchedulerService(None)
-                    logger.info("Successfully imported using services.scheduler_service")
-                except ImportError as e2:
-                    logger.error(f"Alternative import also failed: {e2}")
-                    update.message.reply_text(
-                        "❌ **System error: Watchlist service unavailable**\n\n"
-                        "Please try again later or use /start to return to menu.",
-                        parse_mode='Markdown'
-                    )
-                    return
+                scheduler_service = SchedulerService(None)
+                context.bot_data['scheduler_service'] = scheduler_service
+                logger.warning("Created new scheduler service as fallback")
+                
+            except Exception as e:
+                logger.error(f"Failed to create scheduler service: {e}")
+                update.message.reply_text(
+                    "❌ **System error: Watchlist service unavailable**\n\n"
+                    "Please try again later or use /start to return to menu.",
+                    parse_mode='Markdown'
+                )
+                return
         
-        scheduler_service = context.bot_data['scheduler_service']
-        logger.info(f"Got scheduler service: {type(scheduler_service)}")
+        logger.info(f"Using scheduler service: {type(scheduler_service)} with {len(scheduler_service.user_watchlists)} users")
         
         # Add to watchlist
         logger.info(f"Attempting to add {symbol} {timeframe} to watchlist for user {user_id}")
         success = scheduler_service.add_to_watchlist(user_id, symbol, timeframe)
         logger.info(f"Add to watchlist result: {success}")
         
+        # Debug: Check watchlist state after adding
+        watchlist_data = scheduler_service.get_user_watchlist(user_id)
+        total_tokens = len(watchlist_data.get('tokens', []))
+        logger.info(f"After adding - User {user_id} has {total_tokens} tokens in watchlist")
+        logger.info(f"Scheduler service now has {len(scheduler_service.user_watchlists)} users total")
+        
         if success:
-            watchlist_data = scheduler_service.get_user_watchlist(user_id)
-            total_tokens = len(watchlist_data.get('tokens', []))
-            
             logger.info(f"Successfully added {symbol} to watchlist. Total tokens: {total_tokens}")
             update.message.reply_text(
                 f"✅ **Added {symbol} ({timeframe}) to watchlist!**\n\n"
                 f"📊 Total tokens: {total_tokens}/10\n"
-                f"🔔 You'll receive notifications every 10 minutes\n\n"
+                f"🔔 You'll receive reports every HOUR\n\n"
                 "Use /start to manage your watchlist.",
                 parse_mode='Markdown'
             )
         else:
             # Check if limit exceeded or already exists
-            watchlist_data = scheduler_service.get_user_watchlist(user_id)
             tokens = watchlist_data.get('tokens', [])
             
             # Check if already exists
