@@ -33,4 +33,4 @@ ENV PYTHONPATH=/app
 
 # Lệnh để chạy ứng dụng của bạn khi container khởi động
 # Railway sẽ tự động inject biến môi trường BOT_TOKEN bạn đã cấu hình
-CMD ["python", "main.py"]
+CMD ["python", "backend/main.py"]
