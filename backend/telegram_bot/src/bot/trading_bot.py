@@ -10,7 +10,7 @@ utils_path = os.path.join(os.path.dirname(__file__), 'utils')
 sys.path.append(utils_path)
 
 # Import handlers using absolute imports
-from handlers.command_handlers import start_command, analysis_command
+from handlers.command_handlers import start_command, analysis_command, delete_my_data_command
 from handlers.callback_handlers import handle_callback
 from handlers.message_handlers import handle_message
 from handlers.error_handlers import error_handler
@@ -35,14 +35,22 @@ class TradingBot:
         
     def setup_handlers(self):
         """Register all handlers"""
+        # Store scheduler service in bot_data for handlers to access
+        if not hasattr(self.dispatcher, 'bot_data'):
+            self.dispatcher.bot_data = {}
+        
+        if hasattr(self, 'scheduler_service') and self.scheduler_service:
+            self.dispatcher.bot_data['scheduler_service'] = self.scheduler_service
+        
         # Command handlers
         self.dispatcher.add_handler(CommandHandler("start", start_command))
         self.dispatcher.add_handler(CommandHandler("analysis", analysis_command))
+        self.dispatcher.add_handler(CommandHandler("deletemydata", delete_my_data_command))
         
         # Callback handlers
         self.dispatcher.add_handler(CallbackQueryHandler(handle_callback))
         
-        # Message handlers - THIS IS IMPORTANT!
+        # Message handlers
         self.dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
         
         # Error handler
@@ -50,36 +58,33 @@ class TradingBot:
         
     def setup_scheduler(self):
         """Setup background scheduler"""
-        self.scheduler = BackgroundScheduler()
+        # Initialize scheduler service FIRST
         self.scheduler_service = SchedulerService(self)
         
-        # Wrapper function để run async trong sync context
-        def run_watchlist_update():
-            """Sync wrapper for async watchlist update"""
-            try:
-                # Create new event loop for this thread
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                # Run the async function
-                loop.run_until_complete(self.scheduler_service.update_all_watchlists())
-                
-            except Exception as e:
-                logger.error(f"Error in scheduled watchlist update: {e}")
+        # Then create scheduler
+        self.scheduler = BackgroundScheduler()
         
-        # Add job với sync wrapper
+        # Simple sync function - no async needed
+        def run_watchlist_update():
+            """Sync function for watchlist update"""
+            try:
+                logger.info("🚀 Starting scheduled watchlist analysis...")
+                # Call the sync function directly
+                self.scheduler_service.update_all_watchlists()  # No await
+                logger.info("✅ Scheduled watchlist analysis completed successfully")
+            except Exception as e:
+                logger.error(f"❌ Error in scheduled watchlist analysis: {e}")
+    
+        # Add job with sync function
         self.scheduler.add_job(
-            run_watchlist_update,  # Use sync wrapper instead
+            run_watchlist_update,
             'interval',
-            hours=1,  # Every 1 hour
+            hours=1,  # Every 1 hour for production
             id='watchlist_updates',
             max_instances=1
         )
-        
-        logger.info("Scheduler configured: Watchlist updates every 1 HOUR")
+
+        logger.info("⏰ Scheduler configured: Watchlist analysis every 1 HOUR")
         
     def run(self):
         """Run the bot"""
@@ -88,11 +93,11 @@ class TradingBot:
             self.updater = Updater(token=self.token, use_context=True)
             self.dispatcher = self.updater.dispatcher
             
-            # Setup handlers
-            self.setup_handlers()
-            
-            # Setup scheduler
+            # Setup scheduler FIRST (this creates scheduler_service)
             self.setup_scheduler()
+            
+            # Setup handlers AFTER scheduler (so scheduler_service exists)
+            self.setup_handlers()
             
             # Start scheduler
             self.scheduler.start()
@@ -100,20 +105,25 @@ class TradingBot:
             # Start bot
             self.updater.start_polling()
             
-            logger.info("Bot started successfully!")
+            logger.info("🤖 Trading Bot started successfully!")
+            logger.info(f"📊 Scheduler service initialized: {hasattr(self, 'scheduler_service')}")
             
             # Keep running
             self.updater.idle()
             
         except KeyboardInterrupt:
-            logger.info("Bot stopped by user")
+            logger.info("🛑 Bot stopped by user")
         except Exception as e:
-            logger.error(f"Fatal error: {e}")
+            logger.error(f"💥 Fatal error in bot startup: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
         finally:
             try:
-                if self.scheduler and self.scheduler.running:
+                if hasattr(self, 'scheduler') and self.scheduler and self.scheduler.running:
                     self.scheduler.shutdown()
+                    logger.info("⏰ Scheduler shutdown completed")
                 if self.updater:
                     self.updater.stop()
-            except:
-                pass
+                    logger.info("🤖 Bot updater stopped")
+            except Exception as cleanup_error:
+                logger.error(f"🧹 Error during cleanup: {cleanup_error}")

@@ -1,7 +1,10 @@
 import logging
-import time
+import json
+import os
+import time  # Add this import
 from datetime import datetime
 from typing import Dict, List
+from telegram.error import Unauthorized, BadRequest, NetworkError
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +13,37 @@ class SchedulerService:
         self.bot = bot_instance
         self.user_watchlists = {}
         self.last_update_hour = -1
+        self.data_file = os.path.join(os.path.dirname(__file__), '..', 'data', 'watchlists.json')
+        self.load_watchlists()
         
+    def load_watchlists(self):
+        """Load watchlists from file"""
+        try:
+            if os.path.exists(self.data_file):
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    # Convert string keys back to integers
+                    self.user_watchlists = {int(k): v for k, v in data.items()}
+                logger.info(f"Loaded watchlists for {len(self.user_watchlists)} users")
+            else:
+                self.user_watchlists = {}
+                logger.info("No existing watchlist file found")
+        except Exception as e:
+            logger.error(f"Error loading watchlists: {e}")
+            self.user_watchlists = {}
+    
+    def save_watchlists(self):
+        """Save watchlists to file"""
+        try:
+            os.makedirs(os.path.dirname(self.data_file), exist_ok=True)
+            # Convert integer keys to strings for JSON
+            data = {str(k): v for k, v in self.user_watchlists.items()}
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            logger.debug("Watchlists saved to file")
+        except Exception as e:
+            logger.error(f"Error saving watchlists: {e}")
+    
     def add_to_watchlist(self, user_id: int, symbol: str, timeframe: str = '4h'):
         """Add token to user's watchlist"""
         logger.info(f"Adding {symbol} {timeframe} to watchlist for user {user_id}")
@@ -18,22 +51,25 @@ class SchedulerService:
         if user_id not in self.user_watchlists:
             self.user_watchlists[user_id] = {
                 'tokens': [],
-                'last_signals': {},
-                'notifications_enabled': True
+                'notifications_enabled': True,
+                'created_at': datetime.now().isoformat(),
+                'last_active': datetime.now().isoformat()
             }
-            logger.info(f"Created new watchlist for user {user_id}")
+        
+        # Update last active
+        self.user_watchlists[user_id]['last_active'] = datetime.now().isoformat()
         
         # Check if already exists
         for token in self.user_watchlists[user_id]['tokens']:
             if token['symbol'] == symbol and token['timeframe'] == timeframe:
                 logger.info(f"Token {symbol} {timeframe} already exists for user {user_id}")
-                return False  # Already exists
+                return False
         
         # Check limit (max 10 tokens)
         current_count = len(self.user_watchlists[user_id]['tokens'])
         if current_count >= 10:
-            logger.info(f"Watchlist limit reached for user {user_id}: {current_count}/10")
-            return False  # Limit exceeded
+            logger.warning(f"User {user_id} reached watchlist limit ({current_count}/10)")
+            return False
         
         # Add token
         self.user_watchlists[user_id]['tokens'].append({
@@ -41,6 +77,9 @@ class SchedulerService:
             'timeframe': timeframe,
             'added_at': datetime.now().isoformat()
         })
+        
+        # Save to file
+        self.save_watchlists()
         
         logger.info(f"Successfully added {symbol} {timeframe} to user {user_id} watchlist. Total: {current_count + 1}/10")
         return True
@@ -50,17 +89,14 @@ class SchedulerService:
         logger.info(f"Removing {symbol} {timeframe} from watchlist for user {user_id}")
         
         if user_id not in self.user_watchlists:
-            logger.warning(f"No watchlist found for user {user_id}")
             return False
         
         tokens = self.user_watchlists[user_id]['tokens']
         for i, token in enumerate(tokens):
             if token['symbol'] == symbol and token['timeframe'] == timeframe:
-                del tokens[i]
-                # Remove last signal data
-                signal_key = f"{symbol}_{timeframe}"
-                if signal_key in self.user_watchlists[user_id]['last_signals']:
-                    del self.user_watchlists[user_id]['last_signals'][signal_key]
+                tokens.pop(i)
+                self.user_watchlists[user_id]['last_active'] = datetime.now().isoformat()
+                self.save_watchlists()
                 logger.info(f"Successfully removed {symbol} {timeframe} from user {user_id} watchlist")
                 return True
         
@@ -69,26 +105,31 @@ class SchedulerService:
     
     def get_user_watchlist(self, user_id: int):
         """Get user's watchlist"""
-        watchlist = self.user_watchlists.get(user_id, {
-            'tokens': [], 
-            'last_signals': {},
-            'notifications_enabled': True
-        })
-        logger.info(f"Retrieved watchlist for user {user_id}: {len(watchlist.get('tokens', []))} tokens")
-        return watchlist
+        if user_id not in self.user_watchlists:
+            return {'tokens': [], 'notifications_enabled': True}
+        
+        # Update last active
+        self.user_watchlists[user_id]['last_active'] = datetime.now().isoformat()
+        return self.user_watchlists[user_id]
     
     def clear_watchlist(self, user_id: int):
         """Clear user's entire watchlist"""
         if user_id in self.user_watchlists:
             token_count = len(self.user_watchlists[user_id]['tokens'])
-            self.user_watchlists[user_id] = {
-                'tokens': [],
-                'last_signals': {},
-                'notifications_enabled': True
-            }
+            self.user_watchlists[user_id]['tokens'] = []
+            self.user_watchlists[user_id]['last_active'] = datetime.now().isoformat()
+            self.save_watchlists()
             logger.info(f"Cleared {token_count} tokens from user {user_id} watchlist")
             return True
-        logger.warning(f"No watchlist found to clear for user {user_id}")
+        return False
+    
+    def delete_user_data(self, user_id: int):
+        """Completely delete user data"""
+        if user_id in self.user_watchlists:
+            del self.user_watchlists[user_id]
+            self.save_watchlists()
+            logger.info(f"Deleted all data for user {user_id}")
+            return True
         return False
     
     def toggle_notifications(self, user_id: int):
@@ -96,273 +137,240 @@ class SchedulerService:
         if user_id not in self.user_watchlists:
             self.user_watchlists[user_id] = {
                 'tokens': [],
-                'last_signals': {},
-                'notifications_enabled': True
+                'notifications_enabled': True,
+                'created_at': datetime.now().isoformat(),
+                'last_active': datetime.now().isoformat()
             }
         
         current_state = self.user_watchlists[user_id].get('notifications_enabled', True)
         new_state = not current_state
         self.user_watchlists[user_id]['notifications_enabled'] = new_state
+        self.user_watchlists[user_id]['last_active'] = datetime.now().isoformat()
+        self.save_watchlists()
         
-        logger.info(f"Toggled notifications for user {user_id}: {current_state} -> {new_state}")
+        logger.info(f"User {user_id} notifications: {'enabled' if new_state else 'disabled'}")
         return new_state
     
     def update_all_watchlists(self):
-        """Update all user watchlists - called every 1 hour"""
-        if not self.user_watchlists:
-            logger.info("No watchlists to update")
-            return
-        
+        """Update all user watchlists and send notifications - SYNC VERSION"""
         current_time = datetime.now()
         current_hour = current_time.hour
         
-        # Prevent duplicate updates in the same hour
-        if self.last_update_hour == current_hour:
-            logger.info(f"Already updated in hour {current_hour}, skipping...")
-            return
-        
         self.last_update_hour = current_hour
+        logger.info(f"🚀 Starting watchlist analysis for {len(self.user_watchlists)} users")
         
-        logger.info(f"Starting HOURLY watchlist update at {current_time.strftime('%H:%M:%S')} for {len(self.user_watchlists)} users")
+        # Track users to remove (blocked/unauthorized)
+        users_to_remove = []
         
-        for user_id, watchlist_data in self.user_watchlists.items():
-            if not watchlist_data.get('notifications_enabled', True):
-                logger.info(f"Notifications disabled for user {user_id}, skipping...")
-                continue
+        for user_id, watchlist in self.user_watchlists.items():
+            try:
+                tokens = watchlist.get('tokens', [])
+                notifications_enabled = watchlist.get('notifications_enabled', True)
                 
-            tokens = watchlist_data.get('tokens', [])
-            if not tokens:
-                logger.info(f"No tokens in watchlist for user {user_id}, skipping...")
-                continue
-            
-            logger.info(f"Updating watchlist for user {user_id} with {len(tokens)} tokens")
-            self.update_user_watchlist(user_id, tokens, current_time)
+                if not tokens or not notifications_enabled:
+                    logger.debug(f"⏭️ Skipping user {user_id}: no tokens or notifications disabled")
+                    continue
+                
+                logger.info(f"📊 Processing watchlist for user {user_id} ({len(tokens)} tokens)")
+                
+                # Test if user is still accessible - SYNC VERSION
+                try:
+                    bot = self.bot.updater.bot
+                    chat = bot.get_chat(user_id)  # Sync call
+                    logger.debug(f"✅ User {user_id} is accessible")
+                except Unauthorized:
+                    logger.warning(f"🚫 User {user_id} blocked the bot - marking for removal")
+                    users_to_remove.append(user_id)
+                    continue
+                except BadRequest as e:
+                    if "chat not found" in str(e).lower():
+                        logger.warning(f"👻 User {user_id} chat not found - marking for removal")
+                        users_to_remove.append(user_id)
+                        continue
+                    else:
+                        logger.error(f"❌ BadRequest for user {user_id}: {e}")
+                        continue
+                except NetworkError as e:
+                    logger.warning(f"🌐 Network error checking user {user_id}: {e} - skipping this update")
+                    continue
+                except Exception as e:
+                    logger.error(f"💥 Error checking user {user_id} accessibility: {e}")
+                    continue
+                
+                # Update watchlist for this user - SYNC VERSION
+                self.update_user_watchlist_sync(user_id, tokens, current_time)
+                
+                # Add small delay between users to avoid rate limiting
+                time.sleep(0.1)
+                
+            except Exception as e:
+                logger.error(f"💥 Error processing watchlist for user {user_id}: {e}")
+                if "unauthorized" in str(e).lower() or "forbidden" in str(e).lower():
+                    users_to_remove.append(user_id)
     
-    def update_user_watchlist(self, user_id: int, tokens: List[Dict], current_time: datetime):
-        """Update watchlist for a specific user"""
+        # Remove blocked/unauthorized users
+        for user_id in users_to_remove:
+            logger.info(f"🗑️ Removing data for blocked/unauthorized user {user_id}")
+            self.delete_user_data(user_id)
+        
+        if users_to_remove:
+            logger.info(f"🧹 Cleaned up {len(users_to_remove)} blocked/unauthorized users")
+        
+        logger.info("🎉 Watchlist analysis cycle completed successfully")
+    
+    def update_user_watchlist_sync(self, user_id: int, tokens: List[Dict], current_time: datetime):
+        """Update watchlist for a specific user - RUN REAL ANALYSIS"""
         try:
-            # Import analysis functions using utility module
-            from .analysis_utils import get_analysis_functions
-            
-            analysis_service, analyze_with_smc, format_price = get_analysis_functions()
-            
-            if not analysis_service or not analyze_with_smc:
-                logger.error("Analysis functions not available for watchlist update")
+            # Import analysis functions
+            try:
+                from services.analysis_utils import analyze_with_smc, format_price
+                logger.debug("✅ Successfully imported analysis functions")
+            except ImportError as e:
+                logger.error(f"❌ Failed to import analysis_utils: {e}")
                 return
             
-            new_signals = []
             analyses = []
             
-            # Analyze all tokens
-            for token_data in tokens:
-                symbol = token_data['symbol']
-                timeframe = token_data['timeframe']
+            for token in tokens:
+                symbol = token['symbol']
+                timeframe = token['timeframe']
                 
                 try:
-                    logger.info(f"Analyzing {symbol} {timeframe} for user {user_id}")
-                    result = analyze_with_smc(symbol, timeframe)
+                    logger.info(f"🔄 Analyzing {symbol} {timeframe} for user {user_id}")
                     
-                    if not result.get('error'):
-                        analyses.append(result)
-                        
-                        # Check for NEW signals
-                        signal_key = f"{symbol}_{timeframe}"
-                        current_signals = self.extract_signals(result)
-                        last_signals = self.user_watchlists[user_id]['last_signals'].get(signal_key, {})
-                        
-                        if self.has_new_signals(current_signals, last_signals):
-                            new_signals.append({
-                                'symbol': symbol,
-                                'timeframe': timeframe,
-                                'signals': current_signals,
-                                'analysis': result
-                            })
-                            logger.info(f"New signal detected for {symbol} {timeframe}")
-                        
-                        # Update last signals
-                        self.user_watchlists[user_id]['last_signals'][signal_key] = current_signals
-                        
+                    # RUN REAL analyze_with_smc
+                    analysis_result = analyze_with_smc(symbol, timeframe)
+                    
+                    if not analysis_result.get('error'):
+                        analyses.append(analysis_result)
+                        logger.info(f"✅ Analysis completed for {symbol} {timeframe}")
+                    else:
+                        logger.warning(f"⚠️ Analysis failed for {symbol} {timeframe}: {analysis_result.get('message')}")
+                
                 except Exception as e:
-                    logger.error(f"Error analyzing {symbol} {timeframe}: {e}")
-                    continue
+                    logger.error(f"💥 Error analyzing {symbol} {timeframe} for user {user_id}: {e}")
+        
+            # Send results to Telegram if any analysis succeeded
+            if analyses:
+                self.send_analysis_results_to_telegram(user_id, analyses, current_time, format_price)
+                logger.info(f"📤 Sent {len(analyses)} analysis results to user {user_id}")
+            else:
+                logger.warning(f"⚠️ No successful analyses for user {user_id}")
             
-            # Send comprehensive hourly report
-            self.send_hourly_watchlist_report(user_id, analyses, new_signals, current_time, format_price)
-                
+            # Update last_active for user
+            self.user_watchlists[user_id]['last_active'] = current_time.isoformat()
+            self.save_watchlists()
+            
         except Exception as e:
-            logger.error(f"Error updating watchlist for user {user_id}: {e}")
-    
-    def extract_signals(self, analysis_result):
-        """Extract trading signals from analysis result"""
-        trading_signals = analysis_result.get('analysis', {}).get('trading_signals', {})
-        return {
-            'entry_long': trading_signals.get('entry_long', []),
-            'entry_short': trading_signals.get('entry_short', []),
-            'exit_signals': trading_signals.get('exit_signals', []),
-            'timestamp': analysis_result.get('timestamp', 0)
-        }
-    
-    def has_new_signals(self, current_signals, last_signals):
-        """Check if there are NEW signals compared to last check"""
-        if not last_signals:
-            # First time checking - only notify if there are active signals
-            has_signals = bool(current_signals.get('entry_long') or current_signals.get('entry_short'))
-            if has_signals:
-                logger.info("First time analysis - signals detected")
-            return has_signals
-        
-        # Compare signal counts to detect NEW signals
-        current_long_count = len(current_signals.get('entry_long', []))
-        current_short_count = len(current_signals.get('entry_short', []))
-        current_exit_count = len(current_signals.get('exit_signals', []))
-        
-        last_long_count = len(last_signals.get('entry_long', []))
-        last_short_count = len(last_signals.get('entry_short', []))
-        last_exit_count = len(last_signals.get('exit_signals', []))
-        
-        has_new = (current_long_count > last_long_count or 
-                   current_short_count > last_short_count or
-                   current_exit_count > last_exit_count)
-        
-        if has_new:
-            logger.info(f"New signals detected: Long {last_long_count}->{current_long_count}, Short {last_short_count}->{current_short_count}")
-        
-        return has_new
-    
-    def send_hourly_watchlist_report(self, user_id: int, analyses: List[Dict], new_signals: List[Dict], current_time: datetime, format_price_func=None):
-        """Send comprehensive hourly watchlist report"""
+            logger.error(f"💥 Error in update_user_watchlist_sync for user {user_id}: {e}")
+
+    def send_analysis_results_to_telegram(self, user_id: int, analyses: List[Dict], current_time: datetime, format_price_func):
+        """Send analysis results to Telegram - ENGLISH VERSION"""
         try:
-            if not analyses:
-                logger.info(f"No analyses to report for user {user_id}")
-                return
+            # Build header
+            message = f"📊 **Watchlist Analysis Report**\n"
+            message += f"🕐 {current_time.strftime('%H:%M %d/%m/%Y')}\n"
+            message += "=" * 40 + "\n\n"
             
-            # Default format_price function if not provided
-            if not format_price_func:
-                format_price_func = lambda x: f"${x:.4f}" if x else "$0.00"
-            
-            # Build comprehensive message
-            message = f"📊 **HOURLY WATCHLIST REPORT** 📊\n"
-            message += f"🕐 {current_time.strftime('%H:00 - %d/%m/%Y')}\n\n"
-            
-            # 1. New Signals Section (if any)
-            if new_signals:
-                message += "🚨 **NEW TRADING SIGNALS:** 🚨\n\n"
-                
-                for signal_data in new_signals:
-                    symbol = signal_data['symbol']
-                    timeframe = signal_data['timeframe']
-                    signals = signal_data['signals']
-                    analysis = signal_data['analysis']
-                    
-                    # Current price
-                    current_price = analysis.get('analysis', {}).get('current_price', 0)
-                    
-                    message += f"📈 **{symbol} ({timeframe})**\n"
-                    message += f"💰 Price: {format_price_func(current_price)}\n"
-                    
-                    # Show NEW signals
-                    entry_long = signals.get('entry_long', [])
-                    entry_short = signals.get('entry_short', [])
-                    exit_signals = signals.get('exit_signals', [])
-                    
-                    if entry_long:
-                        latest_long = entry_long[-1]
-                        message += f"🟢 **NEW Long:** {format_price_func(latest_long.get('price', 0))}\n"
-                    
-                    if entry_short:
-                        latest_short = entry_short[-1]
-                        message += f"🔴 **NEW Short:** {format_price_func(latest_short.get('price', 0))}\n"
-                    
-                    if exit_signals:
-                        latest_exit = exit_signals[-1]
-                        message += f"🚪 **Exit:** {format_price_func(latest_exit.get('price', 0))}\n"
-                    
-                    message += "\n"
-            
-            # 2. Market Overview Section  
-            message += "📋 **MARKET OVERVIEW:**\n\n"
-            
-            gainers = []
-            losers = []
-            stable = []
-            
-            for analysis in analyses:
+            # Send each analysis
+            for i, analysis in enumerate(analyses, 1):
                 symbol = analysis.get('symbol', 'Unknown')
                 timeframe = analysis.get('timeframe', '4h')
                 analysis_data = analysis.get('analysis', {})
                 
+                # Extract data
+                smc_data = analysis_data.get('smc_analysis', {})
                 current_price = analysis_data.get('current_price', 0)
                 indicators = analysis_data.get('indicators', {})
+                trading_signals = analysis_data.get('trading_signals', {})
+                
+                # Format signal emoji
+                signal = smc_data.get('signal', 'NEUTRAL')
+                signal_emoji = "🟢" if signal == 'BUY' else "🔴" if signal == 'SELL' else "🟡"
+                
+                # Format price change
                 price_change = indicators.get('price_change_pct', 0)
-                rsi = indicators.get('rsi', 50)
+                change_emoji = "📈" if price_change > 0 else "📉" if price_change < 0 else "➡️"
                 
-                token_info = {
-                    'symbol': symbol,
-                    'timeframe': timeframe,
-                    'price': current_price,
-                    'change': price_change,
-                    'rsi': rsi
-                }
+                # Build analysis message
+                token_msg = f"""**{i}. {symbol} ({timeframe})**
+
+💰 **Price:** {format_price_func(current_price)} {change_emoji} {price_change:+.2f}%
+
+{signal_emoji} **Signal:** {signal}
+📈 **Confidence:** {smc_data.get('confidence', 0)}%
+
+🔲 **Order Blocks:** {smc_data.get('order_blocks', {}).get('status', 'N/A')}
+⚡ **Fair Value Gaps:** {smc_data.get('fair_value_gaps', {}).get('status', 'N/A')}
+📊 **Break of Structure:** {smc_data.get('break_of_structure', {}).get('status', 'N/A')}
+💧 **Liquidity Zones:** {smc_data.get('liquidity_zones', {}).get('status', 'N/A')}
+
+📊 **RSI:** {indicators.get('rsi', 0):.1f}"""
+
+                # Add trading signals if available
+                entry_long = trading_signals.get('entry_long', [])
+                entry_short = trading_signals.get('entry_short', [])
                 
-                if price_change > 2:
-                    gainers.append(token_info)
-                elif price_change < -2:
-                    losers.append(token_info)
-                else:
-                    stable.append(token_info)
+                if entry_long:
+                    token_msg += f"\n🟢 **Entry Long:** {format_price_func(entry_long[0].get('price'))} ({entry_long[0].get('confidence', 0)}%)"
+                
+                if entry_short:
+                    token_msg += f"\n🔴 **Entry Short:** {format_price_func(entry_short[0].get('price'))} ({entry_short[0].get('confidence', 0)}%)"
+                
+                message += token_msg + "\n\n"
+                
+                # Add separator if not last item
+                if i < len(analyses):
+                    message += "─" * 30 + "\n\n"
             
-            # Sort by change percentage
-            gainers.sort(key=lambda x: x['change'], reverse=True)
-            losers.sort(key=lambda x: x['change'])
+            # Add footer
+            message += "=" * 40 + "\n"
+            message += "💡 *Use /start for detailed analysis*\n"
+            message += "🔔 *Automatic reports every hour*\n"
+            message += "⚠️ *For reference only, not financial advice*"
             
-            # Show top performers
-            if gainers:
-                message += "📈 **TOP GAINERS:**\n"
-                for token in gainers[:3]:  # Top 3
-                    rsi_status = "🔴" if token['rsi'] > 70 else "🟡"
-                    message += f"🟢 {token['symbol']} {format_price_func(token['price'])} (+{token['change']:.2f}%) {rsi_status}\n"
-                message += "\n"
-            
-            if losers:
-                message += "📉 **TOP LOSERS:**\n"
-                for token in losers[:3]:  # Top 3
-                    rsi_status = "🟢" if token['rsi'] < 30 else "🟡"
-                    message += f"🔴 {token['symbol']} {format_price_func(token['price'])} ({token['change']:.2f}%) {rsi_status}\n"
-                message += "\n"
-            
-            if stable:
-                message += f"⚖️ **STABLE:** {len(stable)} tokens (-2% to +2%)\n\n"
-            
-            # 3. Statistics
-            total_tokens = len(analyses)
-            total_gainers = len(gainers)
-            total_losers = len(losers)
-            
-            message += "📊 **STATISTICS:**\n"
-            if total_tokens > 0:
-                message += f"📈 Gainers: {total_gainers}/{total_tokens} ({total_gainers/total_tokens*100:.1f}%)\n"
-                message += f"📉 Losers: {total_losers}/{total_tokens} ({total_losers/total_tokens*100:.1f}%)\n"
-            else:
-                message += f"📈 Gainers: 0/0 (0%)\n"
-                message += f"📉 Losers: 0/0 (0%)\n"
-            message += f"🚨 New Signals: {len(new_signals)}\n\n"
-            
-            message += f"🔔 Next update: {(current_time.hour + 1) % 24:02d}:00\n"
-            message += f"💡 Use /start for detailed analysis."
-            
-            # Send report
-            if self.bot and hasattr(self.bot, 'updater'):
+            # Send message với retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
                 try:
-                    self.bot.updater.bot.send_message(
+                    bot = self.bot.updater.bot
+                    bot.send_message(
                         chat_id=user_id,
                         text=message,
                         parse_mode='Markdown'
                     )
-                    logger.info(f"Sent hourly watchlist report to user {user_id} - {total_tokens} tokens, {len(new_signals)} new signals")
+                    
+                    logger.info(f"📤 Successfully sent analysis report to user {user_id} - {len(analyses)} tokens analyzed")
+                    break  # Success, exit retry loop
+                    
+                except NetworkError as e:
+                    logger.warning(f"🌐 Network error sending to user {user_id} (attempt {attempt + 1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    else:
+                        logger.error(f"❌ Failed to send report to user {user_id} after {max_retries} attempts")
+                        raise
+                except Unauthorized:
+                    logger.warning(f"🚫 User {user_id} blocked the bot - cannot send report")
+                    raise  # Re-raise to trigger user removal
                 except Exception as e:
-                    logger.error(f"Error sending Telegram message to user {user_id}: {e}")
-            else:
-                logger.error("Bot instance not available for sending messages")
-            
+                    logger.error(f"💥 Error sending analysis report to user {user_id}: {e}")
+                    raise
+        
         except Exception as e:
-            logger.error(f"Error sending hourly watchlist report to user {user_id}: {e}")
+            logger.error(f"💥 Error in send_analysis_results_to_telegram for user {user_id}: {e}")
+            raise
+    
+    def get_statistics(self):
+        """Get watchlist statistics"""
+        total_users = len(self.user_watchlists)
+        total_tokens = sum(len(wl.get('tokens', [])) for wl in self.user_watchlists.values())
+        active_users = sum(1 for wl in self.user_watchlists.values() if wl.get('notifications_enabled', True))
+        
+        return {
+            'total_users': total_users,
+            'total_tokens': total_tokens,
+            'active_users': active_users,
+            'average_tokens_per_user': total_tokens / total_users if total_users > 0 else 0
+        }

@@ -1,8 +1,10 @@
-import logging
-import os
-import sys
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
+import sys
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Add the correct path to AdvancedSMC
 current_dir = os.path.dirname(__file__)  # handlers directory
@@ -15,25 +17,13 @@ sys.path.insert(0, advancedSMC_path)
 try:
     from AdvancedSMC import AdvancedSMC
     SMC_AVAILABLE = True
-    # Initialize analysis service
     analysis_service = AdvancedSMC()
-    print("AdvancedSMC initialized successfully")
 except ImportError as e:
-    print(f"Warning: Could not import AdvancedSMC: {e}")
+    logger.warning(f"⚠️ Could not import AdvancedSMC: {e}")
     SMC_AVAILABLE = False
-    AdvancedSMC = None
     analysis_service = None
-except Exception as e:
-    print(f"Error initializing AdvancedSMC: {e}")
-    analysis_service = None
-
-logger = logging.getLogger(__name__)
-
-# Import global state storage
-from .message_handlers import USER_STATES
 
 def handle_callback(update: Update, context: CallbackContext):
-    """Main callback handler for inline keyboard buttons"""
     query = update.callback_query
     query.answer()
     
@@ -43,6 +33,9 @@ def handle_callback(update: Update, context: CallbackContext):
     # Initialize user states if not exists
     if not hasattr(context.bot_data, 'user_states'):
         context.bot_data['user_states'] = {}
+    
+    # Get scheduler service from bot_data if available
+    scheduler_service = context.bot_data.get('scheduler_service')
     
     # Route callbacks
     if data == 'custom_token':
@@ -54,16 +47,12 @@ def handle_callback(update: Update, context: CallbackContext):
     elif data == 'watchlist_menu':
         show_watchlist_menu(query, context)
     elif data.startswith('watchlist_'):
-        handle_watchlist_callback(query, context, data)
+        handle_watchlist_callback(query, context, data, scheduler_service)
     elif data.startswith('timeframe_'):
         handle_timeframe_callback(query, context, data)
     elif data.startswith('refresh_'):
         handle_refresh_callback(query, context, data)
-    elif data.startswith('tf_'):
-        handle_tf_callback(query, context, data)
-    elif data.startswith('pair_'):
-        handle_pair_callback(query, context, data)
-    elif data == 'back_to_main' or data == 'start':
+    elif data == 'back_to_main':
         handle_back_to_main(query, context)
     elif data == 'help':
         show_help(query)
@@ -72,26 +61,13 @@ def handle_callback(update: Update, context: CallbackContext):
 
 def handle_custom_token_callback(query, context, user_id):
     """Handle custom token input callback"""
-    # Set state in global storage
-    USER_STATES[user_id] = {"waiting_for": "custom_token"}
-    logger.info(f"Set user {user_id} state to waiting_for: custom_token in global storage")
-    
-    # Add a back button for better UX
-    keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data='start')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
+    context.bot_data['user_states'][user_id] = {"waiting_for": "custom_token"}
     query.edit_message_text(
         "✏️ **Enter Custom Token**\n\n"
-        "Send the token name you want to analyze:\n\n"
-        "**Examples:**\n"
-        "• `BTC` → Will analyze BTC/USDT 4h\n"
-        "• `ETH 1h` → Will analyze ETH/USDT 1h\n"
-        "• `PEPE/USDT` → Will analyze PEPE/USDT 4h\n"
-        "• `SOL 1d` → Will analyze SOL/USDT 1d\n\n"
-        "**Supported timeframes:**\n"
-        "`15m`, `1h`, `4h`, `1d`, `3d`, `1w`\n\n"
-        "💡 **Supports all tokens on Binance!**",
-        reply_markup=reply_markup,
+        "Send the token name you want to analyze:\n"
+        "• Example: BTC, ETH, PEPE\n"
+        "• Or pairs: BTC/USDT, ETH/USDT\n\n"
+        "💡 Supports all Binance tokens!",
         parse_mode='Markdown'
     )
 
@@ -107,37 +83,23 @@ def handle_analyze_callback(query, context, data):
     
     perform_analysis_callback(query, context, symbol, timeframe)
 
-def handle_tf_callback(query, context, data):
-    """Handle timeframe callback (tf_SYMBOL_TIMEFRAME)"""
-    parts = data.replace('tf_', '').split('_')
-    if len(parts) >= 2:
-        symbol = '_'.join(parts[:-1])  # Rejoin symbol
-        symbol = symbol.replace('_', '/')  # Convert back to BTC/USDT format
-        timeframe = parts[-1]
-        perform_analysis_callback(query, context, symbol, timeframe)
-
-def handle_pair_callback(query, context, data):
-    """Handle pair selection callback"""
-    symbol = data.replace('pair_', '')
-    perform_analysis_callback(query, context, symbol, '4h')
-
 def handle_select_pair_callback(query, context):
     """Handle select pair callback"""
     keyboard = [
-        [InlineKeyboardButton("₿ BTC/USDT", callback_data='pair_BTC/USDT'),
-         InlineKeyboardButton("Ξ ETH/USDT", callback_data='pair_ETH/USDT')],
-        [InlineKeyboardButton("🟡 BNB/USDT", callback_data='pair_BNB/USDT'),
-         InlineKeyboardButton("🔵 WLD/USDT", callback_data='pair_WLD/USDT')],
-        [InlineKeyboardButton("🟣 SOL/USDT", callback_data='pair_SOL/USDT'),
-         InlineKeyboardButton("🔴 SEI/USDT", callback_data='pair_SEI/USDT')],
-        [InlineKeyboardButton("🟢 PEPE/USDT", callback_data='pair_PEPE/USDT'),
-         InlineKeyboardButton("🟢 SUI/USDT", callback_data='pair_SUI/USDT')],
-        [InlineKeyboardButton("🔙 Back", callback_data='start')]
+        [InlineKeyboardButton("BTC/USDT", callback_data='analyze_BTC/USDT_4h'),
+         InlineKeyboardButton("ETH/USDT", callback_data='analyze_ETH/USDT_4h')],
+        [InlineKeyboardButton("BNB/USDT", callback_data='analyze_BNB/USDT_4h'),
+         InlineKeyboardButton("ADA/USDT", callback_data='analyze_ADA/USDT_4h')],
+        [InlineKeyboardButton("SOL/USDT", callback_data='analyze_SOL/USDT_4h'),
+         InlineKeyboardButton("DOT/USDT", callback_data='analyze_DOT/USDT_4h')],
+        [InlineKeyboardButton("MATIC/USDT", callback_data='analyze_MATIC/USDT_4h'),
+         InlineKeyboardButton("AVAX/USDT", callback_data='analyze_AVAX/USDT_4h')],
+        [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     query.edit_message_text(
-        "📊 **Select trading pair for analysis:**",
+        "🔍 **Select Popular Token Pair:**",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -153,12 +115,12 @@ def handle_timeframe_callback(query, context, data):
          InlineKeyboardButton("1d", callback_data=f'analyze_{symbol}_1d')],
         [InlineKeyboardButton("3d", callback_data=f'analyze_{symbol}_3d'),
          InlineKeyboardButton("1w", callback_data=f'analyze_{symbol}_1w')],
-        [InlineKeyboardButton("🔙 Back", callback_data='start')]
+        [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     query.edit_message_text(
-        f"⏱️ **Select timeframe for {symbol}:**",
+        f"⏱️ **Select Timeframe for {symbol}:**",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -177,21 +139,16 @@ def perform_analysis_callback(query, context, symbol: str, timeframe: str):
     query.edit_message_text(f"🔄 **Analyzing {symbol} {timeframe}...**", parse_mode='Markdown')
     
     try:
-        # Check if analysis service is available
-        if not analysis_service:
-            query.edit_message_text(
-                "❌ **Error:** Analysis service not available.\n"
-                "Please try again later.",
-                parse_mode='Markdown'
-            )
-            return
+        # Import analysis function
+        from services.analysis_utils import analyze_with_smc
         
-        # Perform analysis using AdvancedSMC
+        # Perform analysis using AdvancedSMC or mock
         result = analyze_with_smc(symbol, timeframe)
         
         if result.get('error'):
             query.edit_message_text(
-                f"❌ **Analysis error for {symbol}:**\n{result.get('message', 'Unknown error')}",
+                f"❌ **Analysis Error for {symbol}**\n\n"
+                f"Details: {result.get('message', 'Unknown error')}",
                 parse_mode='Markdown'
             )
             return
@@ -200,289 +157,110 @@ def perform_analysis_callback(query, context, symbol: str, timeframe: str):
         formatted_result = format_analysis_result(result)
         
         # Create action buttons
-        symbol_encoded = symbol.replace('/', '_')  # BTC/USDT -> BTC_USDT for callback
         keyboard = [
-            [InlineKeyboardButton("📊 15m", callback_data=f'tf_{symbol_encoded}_15m'),
-             InlineKeyboardButton("📊 1h", callback_data=f'tf_{symbol_encoded}_1h'),
-             InlineKeyboardButton("📊 4h", callback_data=f'tf_{symbol_encoded}_4h')],
-            [InlineKeyboardButton("📊 1d", callback_data=f'tf_{symbol_encoded}_1d'),
-             InlineKeyboardButton("📊 3d", callback_data=f'tf_{symbol_encoded}_3d'),
-             InlineKeyboardButton("📊 1w", callback_data=f'tf_{symbol_encoded}_1w')],
-            [InlineKeyboardButton("🔄 Refresh", callback_data=f'tf_{symbol_encoded}_{timeframe}'),
-             InlineKeyboardButton("🏠 Menu", callback_data='start')]
+            [InlineKeyboardButton("➕ Add to Watchlist", callback_data=f'watchlist_add_{symbol}_{timeframe}')],
+            [InlineKeyboardButton("🔄 Refresh", callback_data=f'refresh_{symbol}_{timeframe}')],
+            [InlineKeyboardButton("⏱️ Change Timeframe", callback_data=f'timeframe_{symbol}')],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # Send formatted result
-        try:
-            query.edit_message_text(formatted_result, reply_markup=reply_markup, parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Markdown parse error: {e}")
-            # Fallback: send message without markdown
-            plain_message = formatted_result.replace('*', '').replace('_', '')
-            query.edit_message_text(plain_message, reply_markup=reply_markup)
+        query.edit_message_text(formatted_result, reply_markup=reply_markup, parse_mode='Markdown')
         
     except Exception as e:
-        logger.error(f"Error in analysis: {e}")
-        query.edit_message_text(f"❌ **Error analyzing {symbol}:**\n{str(e)[:100]}...")
+        logger.error(f"💥 Error in perform_analysis_callback: {e}")
+        query.edit_message_text(
+            f"❌ **Analysis Error for {symbol}**\n\n"
+            f"Details: {str(e)}",
+            parse_mode='Markdown'
+        )
 
-def analyze_with_smc(symbol: str, timeframe: str):
-    """Analyze symbol using AdvancedSMC"""
-    try:
-        if not analysis_service:
-            return {
-                'error': True,
-                'message': 'AdvancedSMC service not available'
-            }
-        
-        # Normalize symbol format for Binance
-        if '/' not in symbol and not symbol.endswith('USDT'):
-            symbol = f"{symbol}USDT"
-        elif '/' in symbol:
-            symbol = symbol.replace('/', '')
-        
-        logger.info(f"Analyzing {symbol} {timeframe} with AdvancedSMC...")
-        
-        # Call AdvancedSMC analysis method
-        analysis_result = analysis_service.get_trading_signals(symbol, timeframe)
-        
-        if analysis_result is None:
-            return {
-                'error': True,
-                'message': 'Unable to fetch data from exchange'
-            }
-        
-        # Format the result
-        result = {
-            'error': False,
-            'symbol': symbol,
-            'timeframe': timeframe,
-            'analysis': analysis_result,
-            'timestamp': analysis_result.get('timestamp') if analysis_result else None
-        }
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error in SMC analysis: {e}")
-        return {
-            'error': True,
-            'message': f'Analysis failed: {str(e)}'
-        }
-
-def format_price(price):
-    """Format price based on value range"""
-    if price is None or price == 0:
-        return "$0.00"
-    
-    try:
-        price = float(price)
-        
-        if price >= 10:
-            # For prices >= $10, show 2 decimal places
-            return f"${price:,.2f}"
-        elif price >= 1:
-            # For prices $1-$10, show 4 decimal places
-            return f"${price:.4f}"
-        elif price >= 0.01:
-            # For prices $0.01-$1, show 6 decimal places
-            return f"${price:.6f}"
-        elif price >= 0.0001:
-            # For prices $0.0001-$0.01, show 8 decimal places
-            return f"${price:.8f}"
-        else:
-            # For very small prices, show up to 12 significant digits
-            # Remove trailing zeros
-            formatted = f"${price:.12f}".rstrip('0').rstrip('.')
-            return formatted
-    except (ValueError, TypeError):
-        return f"${price}"
-
-def format_analysis_result(result: dict) -> str:
-    """Format analysis results for display"""
-    if result.get('error'):
-        return f"❌ **Error:** {result.get('message', 'Unknown error')}"
-    
-    analysis_data = result.get('analysis', {})
-    symbol = result.get('symbol', 'Unknown')
-    timeframe = result.get('timeframe', '4h')
-    
-    # Use the same formatting logic from your TradingBot class
-    smc = analysis_data.get('smc_analysis', {})
-    indicators = analysis_data.get('indicators', {})
-    trading_signals = analysis_data.get('trading_signals', {})
-    
-    # Header
-    message = f"📊 *Analysis {symbol} - {timeframe}*\n\n"
-    
-    # Price info with proper formatting
-    current_price = analysis_data.get('current_price', 0)
-    message += f"💰 *Current Price:* {format_price(current_price)}\n"
-    
-    # Indicators with proper price formatting
-    rsi = indicators.get('rsi', 50)
-    rsi_emoji = "🟢" if rsi < 30 else ("🔴" if rsi > 70 else "🟡")
-    message += f"📈 *RSI:* {rsi_emoji} {rsi:.1f}\n"
-    
-    sma_20 = indicators.get('sma_20', 0)
-    ema_20 = indicators.get('ema_20', 0)
-    message += f"📊 *SMA 20:* {format_price(sma_20)}\n"
-    message += f"📉 *EMA 20:* {format_price(ema_20)}\n\n"
-    
-    # Price change
-    price_change = indicators.get('price_change_pct', 0)
-    change_emoji = "📈" if price_change > 0 else "📉"
-    message += f"{change_emoji} *Change:* {price_change:+.2f}%\n\n"
-    
-    # SMC Analysis
-    message += "🔍 *SMC ANALYSIS:*\n"
-    
-    # Order Blocks
-    ob_count = len(smc.get('order_blocks', []))
-    message += f"📦 *Order Blocks:* {ob_count}\n"
-    
-    # Fair Value Gaps
-    fvg_count = len(smc.get('fair_value_gaps', []))
-    message += f"🎯 *Fair Value Gaps:* {fvg_count}\n"
-    
-    # Break of Structure
-    bos_count = len(smc.get('break_of_structure', []))
-    message += f"🔄 *Structure Breaks:* {bos_count}\n"
-    
-    # Liquidity Zones
-    lz_count = len(smc.get('liquidity_zones', []))
-    message += f"💧 *Liquidity Zones:* {lz_count}\n\n"
-    
-    # Trading Signals with proper price formatting
-    if trading_signals:
-        message += "🔔 *TRADING SIGNALS:*\n"
-        
-        entry_long = trading_signals.get('entry_long', [])
-        entry_short = trading_signals.get('entry_short', [])
-        
-        if entry_long:
-            latest_long = entry_long[-1]
-            signal_price = latest_long.get('price', 0)
-            message += f"🟢 *Long Signal:* {format_price(signal_price)}\n"
-        
-        if entry_short:
-            latest_short = entry_short[-1]
-            signal_price = latest_short.get('price', 0)
-            message += f"🔴 *Short Signal:* {format_price(signal_price)}\n"
-        
-        if not entry_long and not entry_short:
-            message += "⏸️ No active signals\n"
-        
-        message += "\n"
-    
-    # Timestamp
-    try:
-        from datetime import datetime
-        timestamp = datetime.fromtimestamp(result.get('timestamp', 0))
-        message += f"🕐 *Updated:* {timestamp.strftime('%H:%M:%S %d/%m/%Y')}"
-    except:
-        message += f"🕐 *Updated:* {result.get('timestamp', 'N/A')}"
-    
-    return message.strip()
-
-def handle_watchlist_callback(query, context, data):
+def handle_watchlist_callback(query, context, data, scheduler_service):
     """Handle watchlist related callbacks"""
     user_id = query.from_user.id
     
-    # Get scheduler service - FIX IMPORT PATH
-    try:
-        if 'scheduler_service' not in context.bot_data:
-            logger.info("Creating scheduler service instance")
-            try:
-                # Import from services directory 
-                import sys
-                import os
-                
-                # Add services directory to Python path
-                services_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'services')
-                if services_path not in sys.path:
-                    sys.path.insert(0, services_path)
-                    logger.info(f"Added services path: {services_path}")
-                
-                from scheduler_service import SchedulerService
-                context.bot_data['scheduler_service'] = SchedulerService(None)
-                logger.info("Successfully created scheduler service")
-            except ImportError as e:
-                logger.error(f"Failed to import SchedulerService: {e}")
-                # Try alternative import
-                try:
-                    from services.scheduler_service import SchedulerService
-                    context.bot_data['scheduler_service'] = SchedulerService(None)
-                    logger.info("Successfully imported using services.scheduler_service")
-                except ImportError as e2:
-                    logger.error(f"Alternative import also failed: {e2}")
-                    query.edit_message_text(
-                        "❌ **Watchlist service temporarily unavailable.**\n\n"
-                        "Please try again later or use /start to return to menu."
-                    )
-                    return
-        
-        scheduler_service = context.bot_data['scheduler_service']
-        
-    except Exception as e:
-        logger.error(f"Error importing scheduler service: {e}")
-        query.edit_message_text(
-            "❌ **Watchlist service temporarily unavailable.**\n\n"
-            "Please try again later or use /start to return to menu."
-        )
-        return
-    
-    # Route watchlist callbacks
     if data == 'watchlist_add':
-        handle_add_to_watchlist(query, context, scheduler_service)
+        context.bot_data['user_states'][user_id] = {"waiting_for": "watchlist_add"}
+        query.edit_message_text(
+            "➕ **Add Token to Watchlist**\n\n"
+            "Send the token name you want to monitor:\n"
+            "• Example: BTC, ETH, PEPE\n"
+            "• Or pairs: BTC/USDT, ETH/USDT\n\n"
+            "💡 Will use 4h timeframe by default.",
+            parse_mode='Markdown'
+        )
+    elif data.startswith('watchlist_add_'):
+        # Extract symbol and timeframe from callback
+        parts = data.replace('watchlist_add_', '').split('_')
+        symbol = '_'.join(parts[:-1])
+        timeframe = parts[-1]
+        add_to_watchlist_callback(query, context, symbol, timeframe, scheduler_service)
     elif data == 'watchlist_view':
         handle_view_watchlist(query, context, scheduler_service)
     elif data == 'watchlist_remove':
-        handle_remove_from_watchlist(query, context, scheduler_service)
+        handle_remove_from_watchlist_menu(query, context, scheduler_service)
+    elif data.startswith('watchlist_remove_'):
+        # Handle individual token removal
+        handle_remove_specific_token(query, context, data, scheduler_service)
     elif data == 'watchlist_clear':
         handle_clear_watchlist(query, context, scheduler_service)
     elif data == 'watchlist_toggle_notifications':
         handle_toggle_notifications(query, context, scheduler_service)
-    elif data.startswith('watchlist_remove_'):
-        parts = data.replace('watchlist_remove_', '').split('_')
-        if len(parts) >= 2:
-            symbol = '/'.join(parts[:-1])  # Reconstruct symbol 
-            timeframe = parts[-1]
-            remove_symbol_from_watchlist(query, context, scheduler_service, symbol, timeframe)
-    elif data == 'watchlist_confirm_clear':
-        confirm_clear_watchlist(query, context, scheduler_service)
+    elif data == 'watchlist_clear_confirm':
+        # Handle confirmed clear
+        handle_clear_watchlist_confirmed(query, context, scheduler_service)
     else:
-        query.edit_message_text("🚧 Watchlist feature under development...")
+        query.edit_message_text("⚠️ Watchlist feature under development...")
 
-def handle_add_to_watchlist(query, context, scheduler_service):
-    """Handle add to watchlist"""
+def add_to_watchlist_callback(query, context, symbol: str, timeframe: str, scheduler_service):
+    """Add token to watchlist via callback"""
     user_id = query.from_user.id
     
-    # Set the waiting state in global storage
-    USER_STATES[user_id] = {"waiting_for": "watchlist_token"}
-    logger.info(f"Set user {user_id} state to waiting_for: watchlist_token in global storage")
+    if not scheduler_service:
+        query.edit_message_text(
+            "❌ **System Error**\n\n"
+            "Scheduler service not available.",
+            parse_mode='Markdown'
+        )
+        return
     
-    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data='watchlist_menu')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    success = scheduler_service.add_to_watchlist(user_id, symbol, timeframe)
     
-    query.edit_message_text(
-        "➕ **Add Token to Watchlist**\n\n"
-        "Send token name with optional timeframe:\n\n"
-        "**Examples:**\n"
-        "• `BTC` → BTC/USDT 4h\n"
-        "• `ETH 1h` → ETH/USDT 1h\n"
-        "• `PEPE/USDT 15m`\n\n"
-        "**Limit: 10 tokens maximum**\n"
-        "**Updates: Every 1 HOUR**",  # Changed from "Every 10 minutes"
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
+    if success:
+        query.edit_message_text(
+            f"✅ **Added {symbol} ({timeframe}) to watchlist!**\n\n"
+            "📋 Use Watchlist menu to manage your monitoring list.\n"
+            "🔔 You will receive hourly notifications for new signals.",
+            parse_mode='Markdown'
+        )
+    else:
+        watchlist = scheduler_service.get_user_watchlist(user_id)
+        current_count = len(watchlist.get('tokens', []))
+        
+        if current_count >= 10:
+            query.edit_message_text(
+                f"❌ **Watchlist limit reached!**\n\n"
+                f"📊 Current: {current_count}/10 tokens\n"
+                "🗑️ Please remove some tokens before adding new ones.",
+                parse_mode='Markdown'
+            )
+        else:
+            query.edit_message_text(
+                f"❌ **Token {symbol} ({timeframe}) already in watchlist!**",
+                parse_mode='Markdown'
+            )
 
 def handle_view_watchlist(query, context, scheduler_service):
     """Handle view watchlist"""
     user_id = query.from_user.id
-    watchlist_data = scheduler_service.get_user_watchlist(user_id)
-    tokens = watchlist_data.get('tokens', [])
+    
+    if not scheduler_service:
+        query.edit_message_text("❌ Scheduler service not available.")
+        return
+    
+    watchlist = scheduler_service.get_user_watchlist(user_id)
+    tokens = watchlist.get('tokens', [])
+    notifications_enabled = watchlist.get('notifications_enabled', True)
     
     if not tokens:
         keyboard = [
@@ -492,64 +270,58 @@ def handle_view_watchlist(query, context, scheduler_service):
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         query.edit_message_text(
-            "📋 **Your Watchlist is Empty**\n\n"
-            "Add up to 10 tokens for automatic monitoring.\n"
-            "You'll receive comprehensive reports every hour with:\n"
-            "• New trading signals\n"
-            "• Market overview\n"
-            "• Performance statistics",
+            "📋 **Watchlist Empty**\n\n"
+            "➕ Use 'Add Token' to start monitoring.",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
         return
     
-    # Build watchlist display
-    message = "📋 **Your Watchlist** 📋\n\n"
+    message = f"📋 **Your Watchlist ({len(tokens)}/10)**\n\n"
     
     for i, token in enumerate(tokens, 1):
         symbol = token['symbol']
         timeframe = token['timeframe']
-        added_at = token.get('added_at', 'Unknown')
-        
-        message += f"{i}. **{symbol}** ({timeframe})\n"
-        if added_at != 'Unknown':
-            try:
-                from datetime import datetime
-                added_date = datetime.fromisoformat(added_at)
-                message += f"   Added: {added_date.strftime('%d/%m %H:%M')}\n"
-            except:
-                pass
-        message += "\n"
+        added_at = token.get('added_at', 'Unknown')[:10]  # Just date
+        message += f"{i}. **{symbol}** ({timeframe}) - {added_at}\n"
     
-    notifications_enabled = watchlist_data.get('notifications_enabled', True)
     notification_status = "🔔 ON" if notifications_enabled else "🔕 OFF"
-    message += f"🔔 Notifications: {notification_status}\n"
-    message += f"📊 Total: {len(tokens)}/10 tokens\n"
-    message += f"⏱️ Updates every HOUR at :00 minutes"  # Changed from "every 10 minutes"
+    message += f"\n📢 **Notifications:** {notification_status}\n"
+    message += f"⏰ **Updates:** Every hour\n\n"
+    message += "💡 Select action below:"
     
-    # Create management buttons
     keyboard = [
-        [InlineKeyboardButton("➕ Add Token", callback_data='watchlist_add'),
-         InlineKeyboardButton("🗑️ Remove Token", callback_data='watchlist_remove')],
-        [InlineKeyboardButton(f"🔔 Toggle Notifications", callback_data='watchlist_toggle_notifications'),
-         InlineKeyboardButton("🧹 Clear All", callback_data='watchlist_clear')],
+        [InlineKeyboardButton("➕ Add Token", callback_data='watchlist_add')],
+        [InlineKeyboardButton("🗑️ Remove Token", callback_data='watchlist_remove')],
+        [InlineKeyboardButton(f"{'🔕 Turn Off' if notifications_enabled else '🔔 Turn On'} Notifications", 
+                             callback_data='watchlist_toggle_notifications')],
+        [InlineKeyboardButton("🗂️ Clear All", callback_data='watchlist_clear')],
         [InlineKeyboardButton("🔙 Back", callback_data='watchlist_menu')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     query.edit_message_text(message, reply_markup=reply_markup, parse_mode='Markdown')
 
-def handle_remove_from_watchlist(query, context, scheduler_service):
-    """Handle remove from watchlist"""
+def handle_remove_from_watchlist_menu(query, context, scheduler_service):
+    """Show menu to select token for removal"""
     user_id = query.from_user.id
-    watchlist_data = scheduler_service.get_user_watchlist(user_id)
-    tokens = watchlist_data.get('tokens', [])
     
-    if not tokens:
-        query.edit_message_text("📋 Your watchlist is empty!")
+    if not scheduler_service:
+        query.edit_message_text("❌ Scheduler service not available.")
         return
     
-    # Create removal buttons
+    watchlist = scheduler_service.get_user_watchlist(user_id)
+    tokens = watchlist.get('tokens', [])
+    
+    if not tokens:
+        query.edit_message_text(
+            "📋 **Watchlist Empty**\n\n"
+            "No tokens to remove.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # Create keyboard with tokens to remove
     keyboard = []
     for token in tokens:
         symbol = token['symbol']
@@ -562,126 +334,229 @@ def handle_remove_from_watchlist(query, context, scheduler_service):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     query.edit_message_text(
-        "🗑️ **Select token to remove:**",
+        "🗑️ **Select Token to Remove:**",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
+
+def handle_remove_specific_token(query, context, data, scheduler_service):
+    """Remove specific token from watchlist"""
+    user_id = query.from_user.id
+    
+    if not scheduler_service:
+        query.edit_message_text("❌ Scheduler service not available.")
+        return
+    
+    # Parse callback data: watchlist_remove_{symbol}_{timeframe}
+    parts = data.replace('watchlist_remove_', '').split('_')
+    timeframe = parts[-1]
+    symbol = '_'.join(parts[:-1])
+    
+    logger.info(f"🗑️ Removing {symbol} {timeframe} from user {user_id} watchlist")
+    
+    success = scheduler_service.remove_from_watchlist(user_id, symbol, timeframe)
+    
+    if success:
+        query.edit_message_text(
+            f"✅ **Removed {symbol} ({timeframe}) from watchlist!**\n\n"
+            "📋 Use Watchlist menu to view current list.",
+            parse_mode='Markdown'
+        )
+    else:
+        query.edit_message_text(
+            f"❌ **Error removing {symbol} ({timeframe})**\n\n"
+            "Token not found in watchlist.",
+            parse_mode='Markdown'
+        )
 
 def handle_clear_watchlist(query, context, scheduler_service):
-    """Handle clear entire watchlist"""
+    """Clear entire watchlist"""
     user_id = query.from_user.id
     
+    if not scheduler_service:
+        query.edit_message_text("❌ Scheduler service not available.")
+        return
+    
+    # Confirm clear action
     keyboard = [
-        [InlineKeyboardButton("✅ Yes, Clear All", callback_data='watchlist_confirm_clear'),
-         InlineKeyboardButton("❌ Cancel", callback_data='watchlist_view')]
+        [InlineKeyboardButton("✅ Confirm Clear", callback_data='watchlist_clear_confirm')],
+        [InlineKeyboardButton("❌ Cancel", callback_data='watchlist_view')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     query.edit_message_text(
-        "🧹 **Clear Entire Watchlist?**\n\n"
-        "This will remove all tokens from your watchlist.\n"
-        "This action cannot be undone.",
+        "⚠️ **Confirm clear entire watchlist?**\n\n"
+        "This action cannot be undone!",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
-def handle_toggle_notifications(query, context, scheduler_service):
-    """Handle toggle notifications"""
+def handle_clear_watchlist_confirmed(query, context, scheduler_service):
+    """Actually clear the watchlist after confirmation"""
     user_id = query.from_user.id
-    new_state = scheduler_service.toggle_notifications(user_id)
     
-    status = "enabled" if new_state else "disabled"
-    emoji = "🔔" if new_state else "🔕"
+    if not scheduler_service:
+        query.edit_message_text("❌ Scheduler service not available.")
+        return
     
-    query.answer(f"Notifications {status}!")
+    success = scheduler_service.clear_watchlist(user_id)
     
-    # Return to watchlist view
-    handle_view_watchlist(query, context, scheduler_service)
+    if success:
+        query.edit_message_text(
+            "✅ **Cleared entire watchlist!**\n\n"
+            "📋 Watchlist is now empty.\n"
+            "➕ Use menu to add new tokens.",
+            parse_mode='Markdown'
+        )
+    else:
+        query.edit_message_text(
+            "ℹ️ **Watchlist already empty**\n\n"
+            "Nothing to clear.",
+            parse_mode='Markdown'
+        )
 
-def show_watchlist_menu(query, context):
-    """Show watchlist management menu"""
-    keyboard = [
-        [InlineKeyboardButton("➕ Add Token", callback_data='watchlist_add'),
-         InlineKeyboardButton("📋 View List", callback_data='watchlist_view')],
-        [InlineKeyboardButton("🗑️ Remove Token", callback_data='watchlist_remove'),
-         InlineKeyboardButton("🔔 Notifications", callback_data='watchlist_toggle_notifications')],
-        [InlineKeyboardButton("🔙 Back", callback_data='start')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+def handle_toggle_notifications(query, context, scheduler_service):
+    """Toggle notifications for user"""
+    user_id = query.from_user.id
+    
+    if not scheduler_service:
+        query.edit_message_text("❌ Scheduler service not available.")
+        return
+    
+    new_state = scheduler_service.toggle_notifications(user_id)
+    status = "ON" if new_state else "OFF"
     
     query.edit_message_text(
-        "👁️ **Watchlist Management** 👁️\n\n"
-        "**Features:**\n"
-        "• Monitor up to 10 tokens\n"
-        "• Auto-update every 1 HOUR\n"  # Changed from "every 10 minutes"
-        "• Comprehensive hourly reports\n"
-        "• New signal notifications\n\n"
-        "Choose an action:",
-        reply_markup=reply_markup,
+        f"🔔 **Turned {status} watchlist notifications!**\n\n"
+        f"📢 Status: {'🔔 ON' if new_state else '🔕 OFF'}\n\n"
+        "💡 Use Watchlist menu to change again.",
         parse_mode='Markdown'
     )
 
 def handle_back_to_main(query, context):
     """Handle back to main menu"""
     keyboard = [
-        [InlineKeyboardButton("📊 Analyze BTC/USDT", callback_data='pair_BTC/USDT')],
-        [InlineKeyboardButton("📈 Analyze ETH/USDT", callback_data='pair_ETH/USDT')],
-        [InlineKeyboardButton("🔍 Select Other Pair", callback_data='select_pair')],
+        [InlineKeyboardButton("📊 Analyze BTC/USDT", callback_data='analyze_BTC/USDT_4h')],
+        [InlineKeyboardButton("📈 Analyze ETH/USDT", callback_data='analyze_ETH/USDT_4h')],
+        [InlineKeyboardButton("🔍 Select Available Pairs", callback_data='select_pair')],
         [InlineKeyboardButton("✏️ Enter Custom Token", callback_data='custom_token')],
         [InlineKeyboardButton("👁️ Watchlist", callback_data='watchlist_menu')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='help')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
+    
     welcome_text = """
-🚀 **Trading Bot SMC**
+🚀 **SMC Trading Bot!**
 
-**Features:**
-• 📊 Order Blocks Analysis
-• 🎯 Fair Value Gaps Detection  
-• 📈 Break of Structure Signals
-• 💧 Liquidity Zones Mapping
-• 🔔 Entry/Exit Signals
+Choose an option below to get started:
 
-Select a pair to analyze:
+💡 **New Features:** 
+• Enter any token available on Binance!
+• Auto-monitoring with hourly updates!
     """
     
     query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
 
+def format_analysis_result(result: dict) -> str:
+    """Format analysis results for display"""
+    if result.get('error'):
+        return f"❌ **Error:** {result.get('message')}"
+    
+    symbol = result.get('symbol', 'Unknown')
+    timeframe = result.get('timeframe', '4h')
+    analysis = result.get('analysis', {})
+    
+    # Extract analysis data
+    smc_data = analysis.get('smc_analysis', {})
+    current_price = analysis.get('current_price', 0)
+    indicators = analysis.get('indicators', {})
+    
+    # Import format_price function
+    try:
+        from services.analysis_utils import format_price
+    except ImportError:
+        def format_price(price):
+            return f"${price:.4f}" if price else "N/A"
+    
+    # Format signal emoji
+    signal = smc_data.get('signal', 'NEUTRAL')
+    signal_emoji = "🟢" if signal == 'BUY' else "🔴" if signal == 'SELL' else "🟡"
+    
+    # Format price change
+    price_change = indicators.get('price_change_pct', 0)
+    change_emoji = "📈" if price_change > 0 else "📉" if price_change < 0 else "➡️"
+    
+    # Format the message
+    formatted_msg = f"""
+📊 **SMC Analysis: {symbol} ({timeframe})**
+
+💰 **Current Price:** {format_price(current_price)} {change_emoji} {price_change:+.2f}%
+
+{signal_emoji} **Signal:** {signal}
+📈 **Confidence:** {smc_data.get('confidence', 0)}%
+
+🔲 **Order Blocks:** {smc_data.get('order_blocks', {}).get('status', 'N/A')}
+⚡ **Fair Value Gaps:** {smc_data.get('fair_value_gaps', {}).get('status', 'N/A')}
+📊 **Break of Structure:** {smc_data.get('break_of_structure', {}).get('status', 'N/A')}
+💧 **Liquidity Zones:** {smc_data.get('liquidity_zones', {}).get('status', 'N/A')}
+
+📊 **RSI:** {indicators.get('rsi', 0):.1f}
+💹 **Volume 24h:** ${indicators.get('volume_24h', 0):,.0f}
+
+⏰ **Updated:** {result.get('timestamp', 'N/A')}
+
+⚠️ *For reference only, not financial advice.*
+    """
+    
+    return formatted_msg.strip()
+
+def show_watchlist_menu(query, context):
+    """Show watchlist management menu"""
+    keyboard = [
+        [InlineKeyboardButton("➕ Add Token", callback_data='watchlist_add')],
+        [InlineKeyboardButton("📋 View List", callback_data='watchlist_view')],
+        [InlineKeyboardButton("🗑️ Remove Token", callback_data='watchlist_remove')],
+        [InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    query.edit_message_text(
+        "👁️ **Watchlist Management**\n\n"
+        "• Maximum 10 tokens\n"
+        "• Auto-updates every hour\n"
+        "• Notifications for new signals\n\n"
+        "Select action:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
 def show_help(query):
     """Show help information"""
     help_text = """
-📖 **Trading Bot SMC Guide**
+ℹ️ **SMC Trading Bot User Guide**
 
-**Smart Money Concepts:**
+**🎯 Main Features:**
+• SMC (Smart Money Concepts) Analysis
+• Order Blocks, Fair Value Gaps
+• Break of Structure, Liquidity Zones
+• Auto-updating Watchlist
 
-🎯 **Order Blocks (OB):** 
-• Areas where smart money places large orders
-• Bullish OB: Red candle before bullish BOS
-• Bearish OB: Green candle before bearish BOS
+**📱 How to Use:**
+1️⃣ Select token from menu
+2️⃣ Or enter custom token
+3️⃣ View analysis results
+4️⃣ Add to watchlist if desired
 
-📈 **Fair Value Gap (FVG):**
-• Price gaps on the chart
-• Usually get "filled" by price
-• Entry signal when retesting FVG
+**⚡ Quick Commands:**
+• /start - Show menu
+• /analysis BTC/USDT 4h - Direct analysis
+• /deletemydata - Delete all data
 
-🔄 **Break of Structure (BOS):**
-• Breaking previous swing high/low
-• Confirms trend change
-• Bullish BOS: Break swing high
-• Bearish BOS: Break swing low
-
-💧 **Liquidity Zones:**
-• High liquidity areas
-• Smart money often sweeps liquidity
-• BSL: Buy Side Liquidity (above)
-• SSL: Sell Side Liquidity (below)
-
-⚠️ **Note:** 
-This is an analysis tool, not financial advice.
+**⚠️ Disclaimer:**
+Bot provides analysis only, not financial advice.
     """
     
-    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data='start')]]
+    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data='back_to_main')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     query.edit_message_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')

@@ -14,7 +14,7 @@ def get_analysis_keyboard():
         ],
         [
             InlineKeyboardButton("🔄 Refresh", callback_data='refresh'),
-            InlineKeyboardButton("✏️ Token khác", callback_data='custom_token'),
+            InlineKeyboardButton("✏️ Other Token", callback_data='custom_token'),
             InlineKeyboardButton("🏠 Menu", callback_data='start')
         ]
     ]

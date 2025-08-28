@@ -10,5 +10,5 @@ def error_handler(update: object, context: CallbackContext) -> None:
     
     if isinstance(update, Update) and update.effective_message:
         update.effective_message.reply_text(
-            "⚠️ Đã xảy ra lỗi. Vui lòng thử lại sau."
+            "⚠️ An error has occurred. Please try again later."
         )
