@@ -1,49 +1,36 @@
-# Use Python 3.10 to match your development environment
+# Stage 1: Sử dụng Python 3.10-slim làm base image, nhẹ và hiệu quả
 FROM python:3.10-slim
 
-# Set working directory
+# Thiết lập biến môi trường để Python chạy ở chế độ không buffer, giúp log hiển thị ngay lập tức
+ENV PYTHONUNBUFFERED=1
+
+# Thiết lập thư mục làm việc bên trong container
 WORKDIR /app
 
-# Install system dependencies including for async operations
-RUN apt-get update && apt-get install -y \
-    gcc \
+# Cài đặt các gói hệ thống cần thiết cho việc biên dịch một số thư viện Python
+# --no-install-recommends giúp giảm kích thước image
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    pkg-config \
-    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (for better caching)
-COPY requirements.txt .
+# Sao chép file requirements.txt vào trước để tận dụng Docker layer caching.
+# Docker sẽ chỉ chạy lại bước này nếu file requirements.txt thay đổi.
+COPY backend/requirements.txt .
 
-# Install Python dependencies
+# Nâng cấp pip và cài đặt các thư viện Python
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire project
+# Sao chép toàn bộ mã nguồn của dự án vào thư mục làm việc /app
+# Điều này bao gồm main.py và thư mục src/
 COPY . .
 
-# Set environment variables
+# Thêm thư mục /app vào PYTHONPATH.
+# Đây là bước QUAN TRỌNG NHẤT để `main.py` có thể tìm thấy module `src`
+# và thực hiện các import tuyệt đối như `from src.bot.trading_bot import TradingBot`
+# mà không cần "hack" sys.path.
 ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
 
-# Set working directory to backend
-WORKDIR /app/backend
-
-# Debug: Show project structure
-RUN echo "=== Project Structure ===" && \
-    find /app -name "*.py" | head -20 && \
-    echo "=== Backend Directory ===" && \
-    ls -la && \
-    echo "=== Config Check ===" && \
-    ls -la config/ || echo "No config directory"
-
-# Expose port for Railway
-EXPOSE $PORT
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import sys; print('Bot is healthy')" || exit 1
-
-# Run the bot
-CMD ["python", "main.py"]
-
+# Lệnh để chạy ứng dụng của bạn khi container khởi động
+# Railway sẽ tự động inject biến môi trường BOT_TOKEN bạn đã cấu hình
+CMD ["python", "backend/main.py"]
