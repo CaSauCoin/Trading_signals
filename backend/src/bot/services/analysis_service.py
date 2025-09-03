@@ -10,56 +10,66 @@ class BotAnalysisService:
         self.smc_analyzer = AdvancedSMC()
 
     def get_analysis_for_symbol(self, symbol: str, timeframe: str) -> dict:
-        """Lấy và xử lý dữ liệu phân tích để bot sử dụng."""
-        logger.info(f"Bắt đầu phân tích cho {symbol} trên khung {timeframe}")
+        """
+        Lấy phân tích chi tiết từ core và tạo insight cho bot.
+        """
+        logger.info(f"Bắt đầu phân tích '{symbol}' ({timeframe}) bằng logic chi tiết.")
         
-        raw_data = self.smc_analyzer.get_analysis(symbol, timeframe)
+        # 1. Gọi hàm get_trading_signals để lấy toàn bộ dữ liệu phân tích
+        analysis_data = self.smc_analyzer.get_trading_signals(symbol, timeframe)
         
-        if raw_data.get('error'):
-            return raw_data
+        if not analysis_data:
+            return {'error': True, 'message': f'Không thể phân tích {symbol}.'}
 
         try:
-            smc_features = raw_data['smc_features']
-            indicators = raw_data['indicators']
+            # 2. Tạo insight bằng logic từ file trading_bot.py của bạn
+            suggestion = self._get_trading_suggestion(
+                analysis_data.get('smc_analysis', {}),
+                analysis_data.get('indicators', {}),
+                analysis_data.get('trading_signals', {})
+            )
             
-            trend = self._determine_trend(smc_features)
-            signal_strength = self._calculate_signal_strength(smc_features)
-            recommendation = self._get_recommendation(trend, indicators.get('rsi', 50))
-
-            return {
-                'symbol': raw_data['symbol'],
-                'timeframe': raw_data['timeframe'],
-                'current_price': raw_data['current_price'],
-                'indicators': indicators,
-                'analysis': {
-                    'trend': trend,
-                    'signal': recommendation,
-                    'confidence': round(signal_strength * 10, 2),
-                    'smc_features': smc_features,
-                },
-                'timestamp': datetime.now().isoformat(),
-                'error': False
-            }
+            # 3. Trả về một dictionary chứa tất cả thông tin cần thiết
+            analysis_data['analysis'] = {'suggestion': suggestion}
+            analysis_data['error'] = False
+            return analysis_data
 
         except Exception as e:
-            logger.error(f"Lỗi xử lý dữ liệu phân tích cho bot: {e}", exc_info=True)
+            logger.error(f"Lỗi khi xử lý và tạo insight cho bot: {e}", exc_info=True)
             return {'error': True, 'message': 'Lỗi xử lý dữ liệu sau phân tích.'}
 
-    def _calculate_signal_strength(self, smc_features: dict):
-        strength = 0.0
-        if 'Bullish' in smc_features.get('break_of_structure', {}).get('status', ''): strength += 3
-        if 'Bearish' in smc_features.get('break_of_structure', {}).get('status', ''): strength += 3
-        if 'Zone' in smc_features.get('order_blocks', {}).get('status', ''): strength += 2
-        if 'Swept' in smc_features.get('liquidity_zones', {}).get('status', ''): strength += 2
-        return min(strength, 10.0)
+    def _get_trading_suggestion(self, smc: dict, indicators: dict, trading_signals: dict) -> str:
+        """
+        Tái tạo logic tạo gợi ý từ file trading_bot.py của bạn.
+        """
+        suggestions = []
+        try:
+            rsi = indicators.get('rsi', 50)
 
-    def _determine_trend(self, smc_features: dict):
-        bos_status = smc_features.get('break_of_structure', {}).get('status', 'N/A')
-        if 'Bullish' in bos_status: return 'Tăng giá'
-        if 'Bearish' in bos_status: return 'Giảm giá'
-        return 'Đi ngang'
+            # Phân tích RSI
+            if rsi > 70: suggestions.append("⚠️ Cân nhắc bán (RSI > 70)")
+            elif rsi < 30: suggestions.append("🚀 Cân nhắc mua (RSI < 30)")
 
-    def _get_recommendation(self, trend: str, rsi: float):
-        if trend == 'Tăng giá' and rsi < 65: return "MUA"
-        if trend == 'Giảm giá' and rsi > 35: return "BÁN"
-        return "CHỜ"
+            # Phân tích SMC
+            if smc.get('break_of_structure'):
+                latest_bos = smc['break_of_structure'][-1]
+                if latest_bos.get('type') == 'bullish_bos': suggestions.append("📈 Xu hướng tăng (Bullish BOS)")
+                elif latest_bos.get('type') == 'bearish_bos': suggestions.append("📉 Xu hướng giảm (Bearish BOS)")
+
+            # Phân tích FVG
+            if smc.get('fair_value_gaps'):
+                suggestions.append("🎯 Chờ giá retest các vùng FVG")
+
+            # Phân tích tín hiệu vào lệnh
+            if trading_signals and trading_signals.get('entry_long'):
+                suggestions.append("🟢 Tín hiệu MUA đã xuất hiện")
+            if trading_signals and trading_signals.get('entry_short'):
+                suggestions.append("🔴 Tín hiệu BÁN đã xuất hiện")
+
+            if not suggestions:
+                return "⏸️ Thị trường đang đi ngang. Nên đứng ngoài quan sát và chờ tín hiệu phá vỡ cấu trúc (BOS)."
+
+            return "\n".join([f"• {s}" for s in suggestions])
+        except Exception as e:
+            logger.error(f"Lỗi trong _get_trading_suggestion: {e}")
+            return "⚠️ Không thể tạo gợi ý - Dữ liệu không đầy đủ."
