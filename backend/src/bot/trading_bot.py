@@ -72,7 +72,7 @@ class TradingBot:
         """Lập lịch cho các công việc chạy nền."""
         job_queue = self.updater.job_queue
         # Chạy job mỗi 60 giây
-        job_queue.run_repeating(notification_job, interval=60, first=10)
+        job_queue.run_repeating(notification_job, interval=3600, first=10)
 
     def run(self):
         """Bắt đầu chạy bot."""
