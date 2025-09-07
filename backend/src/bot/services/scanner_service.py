@@ -1,4 +1,3 @@
-# src/bot/services/scanner_service.py
 import logging
 from src.core.analysis import AdvancedSMC
 from src.core.data_fetcher import get_top_symbols_by_volume
@@ -24,12 +23,12 @@ class MarketScannerService:
         flipped_tokens = []
         new_states = {}
         
-        top_100_symbols = get_top_symbols_by_volume('binance', 250)
+        top_100_symbols = get_top_symbols_by_volume('binance', 100)
         
         for i, symbol in enumerate(top_100_symbols):
             logger.info(f"[SCAN {i+1}/{len(top_100_symbols)}] Đang phân tích {symbol}...")
             try:
-                # SỬA LỖI Ở ĐÂY: Gọi đúng hàm get_telegram_summary
+                # Gọi đúng hàm get_telegram_summary
                 analysis = self.smc_analyzer.get_telegram_summary(symbol, timeframe)
                 if not analysis:
                     continue

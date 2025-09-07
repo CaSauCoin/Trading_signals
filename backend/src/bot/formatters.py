@@ -1,13 +1,9 @@
-# src/bot/formatters.py
 from datetime import datetime
 
 def format_price(price: float) -> str:
     """Định dạng giá token một cách linh hoạt."""
-    """Định dạng giá token một cách linh hoạt."""
     if not isinstance(price, (int, float)) or price == 0:
         return "N/A"
-    if price >= 1:
-        return f"{price:,.2f}"
     if price >= 1:
         return f"{price:,.2f}"
     else:
@@ -46,20 +42,17 @@ def format_analysis_result(result: dict) -> str:
     # ANALYSIS Section
     analysis_section = "🔍 *ANALYSIS:*\n"
     
-    # Order Blocks
     ob_list = smc.get('order_blocks', [])
     analysis_section += f"📦 *Order Blocks:* {len(ob_list)}\n"
 
-    # Structure (BOS)
     bos_list = smc.get('break_of_structure', [])
     analysis_section += f"🔄 *Structure:* {len(bos_list)}\n"
     if bos_list:
         latest_bos = bos_list[-1]
-        bos_type = "BEARISH BOS" if latest_bos.get('BOS') == -1 else "BULLISH BOS"
+        bos_type = latest_bos.get('type', 'N/A').replace('_', ' ').upper()
         analysis_section += f"    *Gần nhất:* {bos_type}\n"
-        analysis_section += f"    *Price:* ${format_price(latest_bos.get('close', 0))}\n"
+        analysis_section += f"    *Price:* ${format_price(latest_bos.get('price', 0))}\n"
 
-    # Liquidity Zones
     lz_list = smc.get('liquidity_zones', [])
     analysis_section += f"💧 *Liquidity Zones:* {len(lz_list)}\n"
     if lz_list:
@@ -72,13 +65,7 @@ def format_analysis_result(result: dict) -> str:
     signals_section = "🔔 *TRADING SIGNALS:*\n"
     has_signal = False
     if trading_signals:
-        entry_long = trading_signals.get('entry_long', [])
         entry_short = trading_signals.get('entry_short', [])
-        if entry_long:
-            has_signal = True
-            latest_long = entry_long[-1]
-            signals_section += f"🟢 *Long Signal:* ${format_price(latest_long.get('price', 0))}\n"
-            signals_section += f"    *Tag:* {latest_long.get('tag', 'N/A')}\n"
         if entry_short:
             has_signal = True
             latest_short = entry_short[-1]
@@ -95,7 +82,7 @@ def format_analysis_result(result: dict) -> str:
     timestamp = datetime.fromtimestamp(result.get('timestamp', datetime.now().timestamp()))
     footer = f"🕐 *Cập nhật:* {timestamp.strftime('%H:%M:%S %d/%m/%Y')}"
 
-    # --- 3. Ghép nối tất cả lại ---
+    # Ghép nối tất cả lại
     full_message = (
         f"{header}\n"
         f"{price_info}\n"
@@ -106,3 +93,28 @@ def format_analysis_result(result: dict) -> str:
     )
 
     return full_message
+
+def format_scanner_notification(flipped_tokens: list, timeframe: str) -> str:
+    """Định dạng thông báo quét thị trường."""
+    
+    bullish_flips = [t for t in flipped_tokens if t['to'] == 'Long']
+    bearish_flips = [t for t in flipped_tokens if t['to'] == 'Short']
+    
+    timestamp = datetime.now().strftime('%H:%M %d/%m/%Y')
+    message = f"🚨 **Tín hiệu Đảo chiều Thị trường - Khung {timeframe}**\n_{timestamp}_\n\n"
+    
+    if bullish_flips:
+        message += "--- Tín hiệu TĂNG GIÁ (Bullish Flips) ---\n"
+        for token in bullish_flips:
+            message += f"🟢 `{token['symbol']}`\n"
+            message += f"    `{token['from']} -> {token['to']}`\n\n"
+    
+    if bearish_flips:
+        message += "--- Tín hiệu GIẢM GIÁ (Bearish Flips) ---\n"
+        for token in bearish_flips:
+            message += f"🔴 `{token['symbol']}`\n"
+            message += f"    `{token['from']} -> {token['to']}`\n\n"
+            
+    message += "_Đây là tín hiệu sớm, hãy tự phân tích kỹ trước khi giao dịch._"
+    
+    return message

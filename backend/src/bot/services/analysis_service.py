@@ -1,4 +1,3 @@
-# src/bot/services/analysis_service.py
 import logging
 from src.core.analysis import AdvancedSMC
 from datetime import datetime
@@ -15,21 +14,21 @@ class BotAnalysisService:
         """
         logger.info(f"Bắt đầu phân tích '{symbol}' ({timeframe}) bằng logic chi tiết.")
         
-        # 1. Gọi hàm get_trading_signals để lấy toàn bộ dữ liệu phân tích
+        # Gọi hàm get_trading_signals để lấy toàn bộ dữ liệu
         analysis_data = self.smc_analyzer.get_trading_signals(symbol, timeframe)
         
         if not analysis_data:
             return {'error': True, 'message': f'Không thể phân tích {symbol}.'}
 
         try:
-            # 2. Tạo insight bằng logic từ file trading_bot.py của bạn
+            # Tạo insight dựa trên kết quả chi tiết
             suggestion = self._get_trading_suggestion(
                 analysis_data.get('smc_analysis', {}),
                 analysis_data.get('indicators', {}),
                 analysis_data.get('trading_signals', {})
             )
             
-            # 3. Trả về một dictionary chứa tất cả thông tin cần thiết
+            # Gói kết quả trả về
             analysis_data['analysis'] = {'suggestion': suggestion}
             analysis_data['error'] = False
             return analysis_data

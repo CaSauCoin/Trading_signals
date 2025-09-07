@@ -1,4 +1,3 @@
-# src/core/analysis.py
 # --- Imports ---
 import numpy as np
 import pandas as pd
@@ -160,6 +159,58 @@ class AdvancedSMC:
             logger.error(f"Lỗi khi phân tích SMC: {e}")
             return None
 
+    def get_telegram_summary(self, symbol, timeframe='4h'):
+        """Lấy tóm tắt ngắn gọn cho Telegram."""
+        try:
+            result = self.get_trading_signals(symbol, timeframe)
+            if not result: return None
+            
+            smc = result['smc_analysis']
+            indicators = result['indicators']
+            signal_strength = self.calculate_signal_strength(smc, indicators)
+            
+            return {
+                'symbol': symbol,
+                'price': result['current_price'],
+                'rsi': indicators.get('rsi', 50),
+                'trend': self.determine_trend(smc),
+                'signal_strength': signal_strength,
+                'key_levels': self.get_key_levels(smc),
+                'recommendation': self.get_recommendation(signal_strength, indicators.get('rsi', 50))
+            }
+        except Exception as e:
+            logger.error(f"Lỗi khi lấy tóm tắt telegram: {e}")
+            return None
+
+    def calculate_signal_strength(self, smc, indicators):
+        strength = 0
+        if smc.get('break_of_structure'): strength += len(smc['break_of_structure']) * 0.3
+        if smc.get('fair_value_gaps'): strength += len(smc['fair_value_gaps']) * 0.2
+        if smc.get('order_blocks'): strength += len(smc['order_blocks']) * 0.1
+        rsi = indicators.get('rsi', 50)
+        if rsi > 70 or rsi < 30: strength += 0.5
+        return min(strength, 10)
+
+    def determine_trend(self, smc):
+        if not smc.get('break_of_structure'): return 'neutral'
+        latest_bos = smc['break_of_structure'][-1]
+        return 'bullish' if latest_bos['type'] == 'bullish_bos' else 'bearish'
+
+    def get_key_levels(self, smc):
+        levels = []
+        for ob in smc.get('order_blocks', [])[-3:]:
+            levels.append({'type': 'order_block', 'price': (ob['high'] + ob['low']) / 2, 'direction': ob['type']})
+        for lz in smc.get('liquidity_zones', [])[-3:]:
+            levels.append({'type': 'liquidity', 'price': lz['price'], 'direction': lz['type']})
+        return levels
+
+    def get_recommendation(self, signal_strength, rsi):
+        if signal_strength > 7 and rsi < 30: return "🚀 STRONG BUY"
+        elif signal_strength > 5 and rsi < 40: return "📈 BUY"
+        elif signal_strength > 7 and rsi > 70: return "🔴 STRONG SELL"
+        elif signal_strength > 5 and rsi > 60: return "📉 SELL"
+        else: return "⏸️ HOLD/WAIT"
+        
     def extract_recent_signals(self, df):
         signals = {'entry_long': [], 'entry_short': [], 'exit_long': [], 'exit_short': []}
         recent_df = df.tail(50)
@@ -179,11 +230,7 @@ class AdvancedSMC:
         order_blocks = []
         for _, row in df.iterrows():
             if row.get('OB', 0) != 0:
-                order_blocks.append({
-                    'type': 'bullish_ob' if row['OB'] == 1 else 'bearish_ob',
-                    'high': row.get('Top_OB'), 'low': row.get('Bottom_OB'),
-                    'time': int(row['timestamp'].timestamp()), 'strength': 'high'
-                })
+                order_blocks.append({'type': 'bullish_ob' if row['OB'] == 1 else 'bearish_ob', 'high': row.get('Top_OB'), 'low': row.get('Bottom_OB'), 'time': int(row['timestamp'].timestamp()), 'strength': 'high'})
         return order_blocks[-10:]
 
     def extract_liquidity_zones(self, df):
@@ -200,19 +247,12 @@ class AdvancedSMC:
         fvgs = []
         for _, row in df.iterrows():
             if row.get('FVG', 0) != 0:
-                fvgs.append({
-                    'type': 'bullish_fvg' if row['FVG'] == 1 else 'bearish_fvg',
-                    'top': row.get('Top_FVG'), 'bottom': row.get('Bottom_FVG'),
-                    'time': int(row['timestamp'].timestamp()), 'filled': False
-                })
+                fvgs.append({'type': 'bullish_fvg' if row['FVG'] == 1 else 'bearish_fvg', 'top': row.get('Top_FVG'), 'bottom': row.get('Bottom_FVG'), 'time': int(row['timestamp'].timestamp()), 'filled': False})
         return fvgs[-20:]
 
     def extract_break_of_structure(self, df):
         bos_signals = []
         for _, row in df.iterrows():
             if row.get('BOS', 0) != 0:
-                bos_signals.append({
-                    'type': 'bullish_bos' if row['BOS'] == 1 else 'bearish_bos',
-                    'price': row['close'], 'time': int(row['timestamp'].timestamp()), 'strength': 'confirmed'
-                })
+                bos_signals.append({'type': 'bullish_bos' if row['BOS'] == 1 else 'bearish_bos', 'price': row['close'], 'time': int(row['timestamp'].timestamp()), 'strength': 'confirmed'})
         return bos_signals[-10:]

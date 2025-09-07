@@ -36,31 +36,54 @@ def calculate_rsi(prices, period=14):
     avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
     avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
     rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
 
-def calculate_indicators(df):
-    """Tính toán các chỉ báo kỹ thuật."""
+def calculate_indicators(df_display, df_calc):
+    """
+    Tính toán các chỉ báo kỹ thuật.
+    """
     try:
         indicators = {}
-        close_prices = df['close']
-        
-        # RSI
-        rsi_values = calculate_rsi(close_prices)
-        indicators['rsi'] = float(rsi_values.iloc[-1]) if not pd.isna(rsi_values.iloc[-1]) else 50.0
-
-        # Price info
-        indicators['current_price'] = float(close_prices.iloc[-1])
-        if len(close_prices) > 1:
-            price_change = float(close_prices.iloc[-1] - close_prices.iloc[-2])
-            indicators['price_change_pct'] = float((price_change / close_prices.iloc[-2]) * 100)
+        if len(df_calc) > 14:
+            rsi_values = calculate_rsi(df_calc['close'])
+            indicators['rsi'] = float(rsi_values.iloc[-1]) if not pd.isna(rsi_values.iloc[-1]) else 50.0
+        if len(df_calc['close']) > 1:
+            price_change = float(df_calc['close'].iloc[-1] - df_calc['close'].iloc[-2])
+            indicators['price_change_pct'] = float((price_change / df_calc['close'].iloc[-2]) * 100) if df_calc['close'].iloc[-2] != 0 else 0.0
         else:
             indicators['price_change_pct'] = 0.0
-
-        # Volume (lấy tổng volume của df)
-        indicators['volume_24h'] = float(df['volume'].sum()) # Đây là ước tính, không chính xác
-        
+        indicators['current_price'] = float(df_calc['close'].iloc[-1])
+        indicators['volume_24h'] = float(df_display['volume'].sum())
+        indicators['sma_20'] = float(df_calc['close'].rolling(window=20).mean().iloc[-1])
+        indicators['ema_20'] = float(df_calc['close'].ewm(span=20).mean().iloc[-1])
         return indicators
     except Exception as e:
         logger.error(f"Lỗi khi tính toán indicators: {e}")
-        return { 'rsi': 50.0, 'current_price': 0.0, 'price_change_pct': 0.0, 'volume_24h': 0.0 }
+        return {}
+
+def get_top_symbols_by_volume(exchange_name: str, limit: int = 100) -> list[str]:
+    """
+    Lấy danh sách các cặp giao dịch có khối lượng 24h cao nhất, lọc theo USDT.
+    """
+    logger.info(f"Đang lấy {limit} token có thanh khoản cao nhất từ {exchange_name}...")
+    try:
+        exchange = getattr(ccxt, exchange_name)()
+        all_tickers = exchange.fetch_tickers()
+        
+        usdt_pairs = {
+            symbol: ticker for symbol, ticker in all_tickers.items()
+            if symbol.endswith('/USDT') and 
+               'USDC' not in symbol and 'BUSD' not in symbol and
+               'UP/' not in symbol and 'DOWN/' not in symbol
+        }
+        
+        sorted_pairs = sorted(usdt_pairs.values(), key=lambda t: t.get('quoteVolume', 0), reverse=True)
+        
+        top_symbols = [ticker['symbol'] for ticker in sorted_pairs[:limit]]
+        logger.info(f"Đã lấy được {len(top_symbols)} token hàng đầu.")
+        return top_symbols
+        
+    except Exception as e:
+        logger.error(f"Lỗi khi lấy danh sách token hàng đầu: {e}")
+        # Trả về danh sách dự phòng nếu API lỗi
+        return ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
