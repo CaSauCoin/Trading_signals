@@ -4,38 +4,38 @@ from . import constants as const
 from typing import List, Dict, Any
 
 def create_main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Tạo bàn phím cho menu chính."""
+    """Create keyboard for main menu."""
     keyboard = [
-        [InlineKeyboardButton("📊 Phân tích BTC/USDT", callback_data=f'{const.CB_ANALYZE}:BTC/USDT:4h')],
-        [InlineKeyboardButton("📈 Phân tích ETH/USDT", callback_data=f'{const.CB_ANALYZE}:ETH/USDT:4h')],
-        [InlineKeyboardButton("🔍 Chọn cặp có sẵn", callback_data=const.CB_SELECT_PAIR)],
-        [InlineKeyboardButton("✏️ Nhập token tùy chỉnh", callback_data=const.CB_CUSTOM_TOKEN)],
+        [InlineKeyboardButton("📊 Analyze BTC/USDT", callback_data=f'{const.CB_ANALYZE}:BTC/USDT:4h')],
+        [InlineKeyboardButton("📈 Analyze ETH/USDT", callback_data=f'{const.CB_ANALYZE}:ETH/USDT:4h')],
+        [InlineKeyboardButton("🔍 Select available pair", callback_data=const.CB_SELECT_PAIR)],
+        [InlineKeyboardButton("✏️ Enter custom token", callback_data=const.CB_CUSTOM_TOKEN)],
         [InlineKeyboardButton("👁️ Watchlist", callback_data=f'{const.CB_WATCHLIST}:menu')],
-        [InlineKeyboardButton("ℹ️ Hướng dẫn", callback_data=const.CB_HELP)]
+        [InlineKeyboardButton("ℹ️ Help", callback_data=const.CB_HELP)]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def create_analysis_options_keyboard(symbol: str, timeframe: str) -> InlineKeyboardMarkup:
-    """Tạo bàn phím sau khi phân tích thành công."""
+    """Create keyboard after successful analysis."""
     keyboard = [
-        [InlineKeyboardButton("➕ Thêm vào Watchlist", callback_data=f'{const.CB_WATCHLIST}:add_direct:{symbol}:{timeframe}')],
-        [InlineKeyboardButton("🔄 Tải lại", callback_data=f'{const.CB_REFRESH}:{symbol}:{timeframe}')],
-        [InlineKeyboardButton("⏱️ Đổi khung thời gian", callback_data=f'{const.CB_TIMEFRAME}:{symbol}')],
-        [InlineKeyboardButton("🔙 Menu chính", callback_data=const.CB_BACK_MAIN)]
+        [InlineKeyboardButton("➕ Add to Watchlist", callback_data=f'{const.CB_WATCHLIST}:add_direct:{symbol}:{timeframe}')],
+        [InlineKeyboardButton("🔄 Refresh", callback_data=f'{const.CB_REFRESH}:{symbol}:{timeframe}')],
+        [InlineKeyboardButton("⏱️ Change timeframe", callback_data=f'{const.CB_TIMEFRAME}:{symbol}')],
+        [InlineKeyboardButton("🔙 Main menu", callback_data=const.CB_BACK_MAIN)]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def create_timeframe_selection_keyboard(symbol: str) -> InlineKeyboardMarkup:
-    """Tạo bàn phím chọn khung thời gian."""
+    """Create timeframe selection keyboard."""
     keyboard = [
         [InlineKeyboardButton(tf, callback_data=f'{const.CB_ANALYZE}:{symbol}:{tf}') for tf in ["15m", "1h", "4h"]],
         [InlineKeyboardButton(tf, callback_data=f'{const.CB_ANALYZE}:{symbol}:{tf}') for tf in ["1d", "3d", "1w"]],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data=const.CB_BACK_MAIN)]
+        [InlineKeyboardButton("🔙 Back", callback_data=const.CB_BACK_MAIN)]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def create_popular_pairs_keyboard() -> InlineKeyboardMarkup:
-    """Tạo bàn phím chọn các cặp phổ biến."""
+    """Create keyboard for selecting popular pairs."""
     pairs = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "ADA/USDT", "SOL/USDT", "DOT/USDT"]
     keyboard = [
         [
@@ -43,36 +43,36 @@ def create_popular_pairs_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(pairs[i+1], callback_data=f'{const.CB_ANALYZE}:{pairs[i+1]}:4h')
         ] for i in range(0, len(pairs), 2)
     ]
-    keyboard.append([InlineKeyboardButton("🔙 Quay lại", callback_data=const.CB_BACK_MAIN)])
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data=const.CB_BACK_MAIN)])
     return InlineKeyboardMarkup(keyboard)
 
 def create_back_to_main_keyboard() -> InlineKeyboardMarkup:
-    """Tạo bàn phím chỉ có nút Back to Main."""
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Quay lại Menu chính", callback_data=const.CB_BACK_MAIN)]])
+    """Create keyboard with only Back to Main button."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data=const.CB_BACK_MAIN)]])
 
 def create_watchlist_menu_keyboard(watchlist: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
-    """Tạo bàn phím quản lý watchlist."""
+    """Create watchlist management keyboard."""
     keyboard = [
-        [InlineKeyboardButton(f"📋 Xem danh sách ({len(watchlist)}/10)", callback_data=f'{const.CB_WATCHLIST}:view')],
-        [InlineKeyboardButton("➕ Thêm Token", callback_data=f'{const.CB_WATCHLIST}:add_prompt')],
-        [InlineKeyboardButton("🗑️ Xóa Token", callback_data=f'{const.CB_WATCHLIST}:remove_menu')],
-        [InlineKeyboardButton("🔙 Menu chính", callback_data=const.CB_BACK_MAIN)]
+        [InlineKeyboardButton(f"📋 View list ({len(watchlist)}/10)", callback_data=f'{const.CB_WATCHLIST}:view')],
+        [InlineKeyboardButton("➕ Add Token", callback_data=f'{const.CB_WATCHLIST}:add_prompt')],
+        [InlineKeyboardButton("🗑️ Remove Token", callback_data=f'{const.CB_WATCHLIST}:remove_menu')],
+        [InlineKeyboardButton("🔙 Main menu", callback_data=const.CB_BACK_MAIN)]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def create_post_add_watchlist_keyboard() -> InlineKeyboardMarkup:
     """
-    Tạo bàn phím hiển thị sau khi thêm token vào watchlist thành công.
+    Create keyboard displayed after successfully adding token to watchlist.
     """
     keyboard = [
-        [InlineKeyboardButton("➕ Thêm Token Khác", callback_data=f'{const.CB_WATCHLIST}:add_prompt')],
-        [InlineKeyboardButton("📋 Xem danh sách", callback_data=f'{const.CB_WATCHLIST}:view')],
-        [InlineKeyboardButton("🔙 Menu chính", callback_data=f'{const.CB_BACK_MAIN}')]
+        [InlineKeyboardButton("➕ Add Another Token", callback_data=f'{const.CB_WATCHLIST}:add_prompt')],
+        [InlineKeyboardButton("📋 View list", callback_data=f'{const.CB_WATCHLIST}:view')],
+        [InlineKeyboardButton("🔙 Main menu", callback_data=f'{const.CB_BACK_MAIN}')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def create_remove_token_keyboard(watchlist: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
-    """Tạo bàn phím để chọn token cần xóa."""
+    """Create keyboard to select token to remove."""
     keyboard = []
     for item in watchlist:
         symbol = item['symbol']
@@ -81,5 +81,5 @@ def create_remove_token_keyboard(watchlist: List[Dict[str, Any]]) -> InlineKeybo
         callback_data = f"{const.CB_WATCHLIST}:remove_confirm:{symbol}:{timeframe}"
         keyboard.append([InlineKeyboardButton(text, callback_data=callback_data)])
     
-    keyboard.append([InlineKeyboardButton("🔙 Quay lại Watchlist", callback_data=f'{const.CB_WATCHLIST}:menu')])
+    keyboard.append([InlineKeyboardButton("🔙 Back to Watchlist", callback_data=f'{const.CB_WATCHLIST}:menu')])
     return InlineKeyboardMarkup(keyboard)

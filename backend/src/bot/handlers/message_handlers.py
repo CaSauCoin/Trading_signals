@@ -11,7 +11,7 @@ from .callback_handlers import perform_analysis
 logger = logging.getLogger(__name__)
 
 def handle_message(update: Update, context: CallbackContext):
-    """Xử lý tin nhắn văn bản từ người dùng."""
+    """Handle text messages from users."""
     user_id = update.effective_user.id
     message_text = update.message.text.strip()
     
@@ -25,36 +25,36 @@ def handle_message(update: Update, context: CallbackContext):
     elif waiting_for == const.STATE_ADD_WATCHLIST:
         handle_watchlist_add_input(update, context, message_text)
     else:
-        # Mặc định, hướng dẫn người dùng
+        # Default, guide the user
         update.message.reply_text(
-            "🤖 Vui lòng sử dụng các nút bấm hoặc lệnh /start để tương tác.",
+            "🤖 Please use the buttons or /start command to interact.",
             parse_mode='Markdown'
         )
 
 def handle_custom_token_input(update: Update, context: CallbackContext, token_input: str):
-    """Xử lý token tùy chỉnh do người dùng nhập."""
+    """Handle custom token input from user."""
     user_id = update.effective_user.id
     
-    # Chuẩn hóa input
+    # Normalize input
     symbol = token_input.upper()
     if '/' not in symbol:
         symbol += "/USDT"
     
-    # Reset trạng thái người dùng
+    # Reset user state
     reset_user_state(user_id, context)
     
-    # Gửi tin nhắn tạm thời và gọi hàm phân tích
-    loading_msg = update.message.reply_text(f"Đang tìm {symbol}...", parse_mode='Markdown')
+    # Send temporary message and call analysis function
+    loading_msg = update.message.reply_text(f"Searching for {symbol}...", parse_mode='Markdown')
     perform_analysis(loading_msg, context, symbol, timeframe='4h')
 
 def handle_watchlist_add_input(update: Update, context: CallbackContext, text: str):
-    """Xử lý input để thêm vào watchlist."""
+    """Handle input to add to watchlist."""
     user_id = update.effective_user.id
     scheduler_service = context.bot_data['scheduler_service']
     
     parts = text.split()
     if len(parts) != 2:
-        update.message.reply_text("❌ Sai định dạng. Vui lòng nhập lại, ví dụ: `BTC/USDT 4h`", parse_mode='Markdown')
+        update.message.reply_text("❌ Wrong format. Please try again, example: `BTC/USDT 4h`", parse_mode='Markdown')
         return
 
     symbol = parts[0].upper()
@@ -70,8 +70,7 @@ def handle_watchlist_add_input(update: Update, context: CallbackContext, text: s
     reset_user_state(user_id, context)
     if result['success']:
         keyboard = keyboards.create_post_add_watchlist_keyboard()
-        message_text = f"✅ **Thành công!**\n\n{result['message']}\n\nBạn muốn làm gì tiếp theo?"
+        message_text = f"✅ **Success!**\n\n{result['message']}\n\nWhat would you like to do next?"
         update.message.reply_text(message_text, reply_markup=keyboard, parse_mode='Markdown')
     else:
         update.message.reply_text(result['message'])
-

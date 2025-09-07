@@ -4,14 +4,14 @@ import pandas as pd
 from datetime import datetime
 import logging
 from functools import reduce
-# SỬA LẠI IMPORT ĐỂ PHÙ HỢP CẤU TRÚC
+# FIXED IMPORT TO MATCH STRUCTURE
 from .data_fetcher import fetch_ohlcv, calculate_indicators
 
 logger = logging.getLogger(__name__)
 
 def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataFrame:
     """
-    Hàm này phân tích và thêm các cột SMC vào DataFrame.
+    This function analyzes and adds SMC columns to the DataFrame.
     """
     if len(df) < swing_lookback * 2 + 1:
         cols = ['swing_high', 'swing_low', 'bos_choch_signal', 'BOS', 'CHOCH', 'OB', 
@@ -20,11 +20,11 @@ def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataF
             df[col] = 0 if col not in ['Top_OB', 'Bottom_OB', 'Top_FVG', 'Bottom_FVG'] else np.nan
         return df
 
-    # --- 1. Xác định Swing Highs & Swing Lows ---
+    # --- 1. Identify Swing Highs & Swing Lows ---
     df['swing_high'] = df['high'].rolling(window=swing_lookback*2+1, center=True).max() == df['high']
     df['swing_low'] = df['low'].rolling(window=swing_lookback*2+1, center=True).min() == df['low']
     
-    # --- 2. Xác định Break of Structure (BOS) và Change of Character (CHoCH) ---
+    # --- 2. Identify Break of Structure (BOS) and Change of Character (CHoCH) ---
     last_swing_high, last_swing_low, trend, bos_choch = np.nan, np.nan, 0, []
     for i in range(len(df)):
         is_swing_high, is_swing_low = df['swing_high'].iloc[i], df['swing_low'].iloc[i]
@@ -45,7 +45,7 @@ def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataF
     df['BOS'] = df['bos_choch_signal'].apply(lambda x: 1 if x == 1 else (-1 if x == -1 else 0))
     df['CHOCH'] = df['bos_choch_signal'].apply(lambda x: 1 if x == 2 else (-1 if x == -2 else 0))
 
-    # --- 3. Xác định Order Blocks (OB) ---
+    # --- 3. Identify Order Blocks (OB) ---
     df['OB'], df['Top_OB'], df['Bottom_OB'] = 0, np.nan, np.nan
     for i in range(1, len(df)):
         if df['bos_choch_signal'].iloc[i] in [1, 2]:
@@ -59,7 +59,7 @@ def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataF
                     df.loc[df.index[j], ['OB', 'Top_OB', 'Bottom_OB']] = [-1, df['high'].iloc[j], df['low'].iloc[j]]
                     break
     
-    # --- 4. Xác định Fair Value Gaps (FVG) ---
+    # --- 4. Identify Fair Value Gaps (FVG) ---
     df['FVG'], df['Top_FVG'], df['Bottom_FVG'] = 0, np.nan, np.nan
     for i in range(2, len(df)):
         if df['low'].iloc[i-2] > df['high'].iloc[i]:
@@ -67,7 +67,7 @@ def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataF
         elif df['high'].iloc[i-2] < df['low'].iloc[i]:
             df.loc[df.index[i-1], ['FVG', 'Top_FVG', 'Bottom_FVG']] = [-1, df['high'].iloc[i-2], df['low'].iloc[i]]
 
-    # --- 5. Xác định Liquidity Sweeps ---
+    # --- 5. Identify Liquidity Sweeps ---
     df['Swept'] = 0
     recent_high = df['high'].rolling(5).max().shift(1)
     recent_low = df['low'].rolling(5).min().shift(1)
@@ -84,7 +84,7 @@ class AdvancedSMC:
         try:
             return fetch_ohlcv(self.exchange_name, symbol, timeframe, limit)
         except Exception as e:
-            logger.error(f"Lỗi khi lấy dữ liệu: {e}")
+            logger.error(f"Error fetching data: {e}")
             return None
 
     def analyze_smc_structure(self, df):
@@ -156,11 +156,11 @@ class AdvancedSMC:
                 'indicators': indicators
             }
         except Exception as e:
-            logger.error(f"Lỗi khi phân tích SMC: {e}")
+            logger.error(f"Error in SMC analysis: {e}")
             return None
 
     def get_telegram_summary(self, symbol, timeframe='4h'):
-        """Lấy tóm tắt ngắn gọn cho Telegram."""
+        """Get brief summary for Telegram."""
         try:
             result = self.get_trading_signals(symbol, timeframe)
             if not result: return None
@@ -179,7 +179,7 @@ class AdvancedSMC:
                 'recommendation': self.get_recommendation(signal_strength, indicators.get('rsi', 50))
             }
         except Exception as e:
-            logger.error(f"Lỗi khi lấy tóm tắt telegram: {e}")
+            logger.error(f"Error getting telegram summary: {e}")
             return None
 
     def calculate_signal_strength(self, smc, indicators):

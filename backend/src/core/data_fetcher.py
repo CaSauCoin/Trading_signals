@@ -8,26 +8,26 @@ import logging
 logger = logging.getLogger(__name__)
 
 def fetch_ohlcv(exchange_name, symbol, timeframe, limit):
-    """Lấy dữ liệu OHLCV từ sàn giao dịch được chỉ định."""
+    """Fetch OHLCV data from specified exchange."""
     try:
         exchange = getattr(ccxt, exchange_name)({
             'timeout': 30000,
             'enableRateLimit': True,
         })
-        logger.info(f"Đang lấy {limit} nến {symbol} {timeframe} từ {exchange_name}...")
+        logger.info(f"Fetching {limit} candles of {symbol} {timeframe} from {exchange_name}...")
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         if not ohlcv:
-            raise ccxt.NetworkError("Không có dữ liệu OHLCV được trả về")
+            raise ccxt.NetworkError("No OHLCV data returned")
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        logger.info(f"Đã lấy thành công {len(df)} nến.")
+        logger.info(f"Successfully fetched {len(df)} candles.")
         return df
     except Exception as e:
-        logger.error(f"Lỗi khi lấy dữ liệu cho {symbol}: {e}")
+        logger.error(f"Error fetching data for {symbol}: {e}")
         return None
 
 def calculate_rsi(prices, period=14):
-    """Tính RSI."""
+    """Calculate RSI."""
     if len(prices) < period:
         return pd.Series([np.nan] * len(prices))
     delta = prices.diff()
@@ -40,7 +40,7 @@ def calculate_rsi(prices, period=14):
 
 def calculate_indicators(df_display, df_calc):
     """
-    Tính toán các chỉ báo kỹ thuật.
+    Calculate technical indicators.
     """
     try:
         indicators = {}
@@ -58,14 +58,14 @@ def calculate_indicators(df_display, df_calc):
         indicators['ema_20'] = float(df_calc['close'].ewm(span=20).mean().iloc[-1])
         return indicators
     except Exception as e:
-        logger.error(f"Lỗi khi tính toán indicators: {e}")
+        logger.error(f"Error calculating indicators: {e}")
         return {}
 
 def get_top_symbols_by_volume(exchange_name: str, limit: int = 100) -> list[str]:
     """
-    Lấy danh sách các cặp giao dịch có khối lượng 24h cao nhất, lọc theo USDT.
+    Get list of trading pairs with highest 24h volume, filtered by USDT.
     """
-    logger.info(f"Đang lấy {limit} token có thanh khoản cao nhất từ {exchange_name}...")
+    logger.info(f"Fetching top {limit} tokens by liquidity from {exchange_name}...")
     try:
         exchange = getattr(ccxt, exchange_name)()
         all_tickers = exchange.fetch_tickers()
@@ -80,10 +80,10 @@ def get_top_symbols_by_volume(exchange_name: str, limit: int = 100) -> list[str]
         sorted_pairs = sorted(usdt_pairs.values(), key=lambda t: t.get('quoteVolume', 0), reverse=True)
         
         top_symbols = [ticker['symbol'] for ticker in sorted_pairs[:limit]]
-        logger.info(f"Đã lấy được {len(top_symbols)} token hàng đầu.")
+        logger.info(f"Successfully fetched {len(top_symbols)} top tokens.")
         return top_symbols
         
     except Exception as e:
-        logger.error(f"Lỗi khi lấy danh sách token hàng đầu: {e}")
-        # Trả về danh sách dự phòng nếu API lỗi
+        logger.error(f"Error fetching top tokens list: {e}")
+        # Return fallback list if API fails
         return ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]

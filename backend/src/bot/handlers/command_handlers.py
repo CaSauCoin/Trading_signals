@@ -7,7 +7,7 @@ from src.bot.formatters import format_analysis_result
 from .callback_handlers import show_watchlist_menu, perform_analysis
 
 def start_command(update: Update, context: CallbackContext):
-    """Gửi tin nhắn chào mừng và menu chính."""
+    """Send welcome message and main menu."""
     user_id = update.effective_user.id
     reset_user_state(user_id, context)
     
@@ -15,9 +15,9 @@ def start_command(update: Update, context: CallbackContext):
     update.message.reply_text(const.WELCOME_TEXT, reply_markup=reply_markup, parse_mode='Markdown')
 
 def analysis_command(update: Update, context: CallbackContext):
-    """Xử lý lệnh /analysis <SYMBOL> <TIMEFRAME>."""
+    """Handle /analysis <SYMBOL> <TIMEFRAME> command."""
     if not context.args or len(context.args) < 1:
-        usage_text = "📖 **Cách dùng:** `/analysis BTC/USDT 4h`"
+        usage_text = "📖 **Usage:** `/analysis BTC/USDT 4h`"
         update.message.reply_text(usage_text, parse_mode='Markdown')
         return
 
@@ -26,9 +26,9 @@ def analysis_command(update: Update, context: CallbackContext):
         symbol += "/USDT"
     timeframe = context.args[1].lower() if len(context.args) > 1 else '4h'
     
-    loading_msg = update.message.reply_text(f"🔄 Đang phân tích {symbol} {timeframe}...", parse_mode='Markdown')
+    loading_msg = update.message.reply_text(f"🔄 Analyzing {symbol} {timeframe}...", parse_mode='Markdown')
     perform_analysis(loading_msg, context, symbol, timeframe)
 
 def watchlist_command(update: Update, context: CallbackContext):
-    """Hiển thị menu watchlist khi người dùng gõ lệnh."""
+    """Show watchlist menu when user types command."""
     show_watchlist_menu(update, context)
