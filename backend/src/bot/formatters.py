@@ -3,8 +3,11 @@ from datetime import datetime
 
 def format_price(price: float) -> str:
     """Định dạng giá token một cách linh hoạt."""
+    """Định dạng giá token một cách linh hoạt."""
     if not isinstance(price, (int, float)) or price == 0:
         return "N/A"
+    if price >= 1:
+        return f"{price:,.2f}"
     if price >= 1:
         return f"{price:,.2f}"
     else:
