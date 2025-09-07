@@ -48,7 +48,7 @@ def market_scanner_job(context: CallbackContext):
     previous_states = context.bot_data.get('scanner_states', {})
     
     logger.info("--- STARTING MARKET SCAN (4H) ---")
-    flipped_tokens, new_states = scanner_service.run_scan(previous_states, timeframe='4h')
+    flipped_tokens, new_states = scanner_service.run_scan(previous_states, timeframe='1d')
     context.bot_data['scanner_states'] = new_states
     logger.info(f"--- SCAN COMPLETE, FOUND {len(flipped_tokens)} REVERSAL SIGNALS ---")
 

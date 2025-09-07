@@ -2,17 +2,13 @@
 
 # --- Texts ---
 WELCOME_TEXT = """
-🚀 **SMC Trading Bot!**
+🚀 **Alpha Signal!**
 
-Choose an option below to get started:
-
-💡 **New Features:**
-• Enter any token available on Binance!
-• Automatic tracking with hourly updates!
+Choose an option below to get started
 """
 
 HELP_TEXT = """
-ℹ️ **SMC Trading Bot User Guide**
+ℹ️ **Alpha Signal User Guide**
 
 **🎯 Main Features:**
 • Analysis based on SMC (Smart Money Concepts)

@@ -34,8 +34,8 @@ def format_analysis_result(result: dict) -> str:
     price_info = (
         f"💰 *Current Price:* ${format_price(price)}\n"
         f"📈 *RSI:* {indicators.get('rsi', 0):.1f}\n"
-        f"📊 *SMA20:* ${format_price(indicators.get('sma_20', 0))}\n"
-        f"📉 *EMA20:* ${format_price(indicators.get('ema_20', 0))}\n"
+        # f"📊 *SMA20:* ${format_price(indicators.get('sma_20', 0))}\n"
+        # f"📉 *EMA20:* ${format_price(indicators.get('ema_20', 0))}\n"
         f"📈 *24h Change:* {indicators.get('price_change_pct', 0):+.2f}%\n"
     )
 
