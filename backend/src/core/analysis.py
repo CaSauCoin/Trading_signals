@@ -1,18 +1,17 @@
-# src/core/analysis.py
 # --- Imports ---
 import numpy as np
 import pandas as pd
 from datetime import datetime
 import logging
 from functools import reduce
-# SỬA LẠI IMPORT ĐỂ PHÙ HỢP CẤU TRÚC
+# FIXED IMPORT TO MATCH STRUCTURE
 from .data_fetcher import fetch_ohlcv, calculate_indicators
 
 logger = logging.getLogger(__name__)
 
 def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataFrame:
     """
-    Hàm này phân tích và thêm các cột SMC vào DataFrame.
+    This function analyzes and adds SMC columns to the DataFrame.
     """
     if len(df) < swing_lookback * 2 + 1:
         cols = ['swing_high', 'swing_low', 'bos_choch_signal', 'BOS', 'CHOCH', 'OB', 
@@ -21,11 +20,11 @@ def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataF
             df[col] = 0 if col not in ['Top_OB', 'Bottom_OB', 'Top_FVG', 'Bottom_FVG'] else np.nan
         return df
 
-    # --- 1. Xác định Swing Highs & Swing Lows ---
+    # --- 1. Identify Swing Highs & Swing Lows ---
     df['swing_high'] = df['high'].rolling(window=swing_lookback*2+1, center=True).max() == df['high']
     df['swing_low'] = df['low'].rolling(window=swing_lookback*2+1, center=True).min() == df['low']
     
-    # --- 2. Xác định Break of Structure (BOS) và Change of Character (CHoCH) ---
+    # --- 2. Identify Break of Structure (BOS) and Change of Character (CHoCH) ---
     last_swing_high, last_swing_low, trend, bos_choch = np.nan, np.nan, 0, []
     for i in range(len(df)):
         is_swing_high, is_swing_low = df['swing_high'].iloc[i], df['swing_low'].iloc[i]
@@ -46,7 +45,7 @@ def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataF
     df['BOS'] = df['bos_choch_signal'].apply(lambda x: 1 if x == 1 else (-1 if x == -1 else 0))
     df['CHOCH'] = df['bos_choch_signal'].apply(lambda x: 1 if x == 2 else (-1 if x == -2 else 0))
 
-    # --- 3. Xác định Order Blocks (OB) ---
+    # --- 3. Identify Order Blocks (OB) ---
     df['OB'], df['Top_OB'], df['Bottom_OB'] = 0, np.nan, np.nan
     for i in range(1, len(df)):
         if df['bos_choch_signal'].iloc[i] in [1, 2]:
@@ -60,7 +59,7 @@ def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataF
                     df.loc[df.index[j], ['OB', 'Top_OB', 'Bottom_OB']] = [-1, df['high'].iloc[j], df['low'].iloc[j]]
                     break
     
-    # --- 4. Xác định Fair Value Gaps (FVG) ---
+    # --- 4. Identify Fair Value Gaps (FVG) ---
     df['FVG'], df['Top_FVG'], df['Bottom_FVG'] = 0, np.nan, np.nan
     for i in range(2, len(df)):
         if df['low'].iloc[i-2] > df['high'].iloc[i]:
@@ -68,7 +67,7 @@ def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataF
         elif df['high'].iloc[i-2] < df['low'].iloc[i]:
             df.loc[df.index[i-1], ['FVG', 'Top_FVG', 'Bottom_FVG']] = [-1, df['high'].iloc[i-2], df['low'].iloc[i]]
 
-    # --- 5. Xác định Liquidity Sweeps ---
+    # --- 5. Identify Liquidity Sweeps ---
     df['Swept'] = 0
     recent_high = df['high'].rolling(5).max().shift(1)
     recent_low = df['low'].rolling(5).min().shift(1)
@@ -85,7 +84,7 @@ class AdvancedSMC:
         try:
             return fetch_ohlcv(self.exchange_name, symbol, timeframe, limit)
         except Exception as e:
-            logger.error(f"Lỗi khi lấy dữ liệu: {e}")
+            logger.error(f"Error fetching data: {e}")
             return None
 
     def analyze_smc_structure(self, df):
@@ -157,9 +156,61 @@ class AdvancedSMC:
                 'indicators': indicators
             }
         except Exception as e:
-            logger.error(f"Lỗi khi phân tích SMC: {e}")
+            logger.error(f"Error in SMC analysis: {e}")
             return None
 
+    def get_telegram_summary(self, symbol, timeframe='4h'):
+        """Get brief summary for Telegram."""
+        try:
+            result = self.get_trading_signals(symbol, timeframe)
+            if not result: return None
+            
+            smc = result['smc_analysis']
+            indicators = result['indicators']
+            signal_strength = self.calculate_signal_strength(smc, indicators)
+            
+            return {
+                'symbol': symbol,
+                'price': result['current_price'],
+                'rsi': indicators.get('rsi', 50),
+                'trend': self.determine_trend(smc),
+                'signal_strength': signal_strength,
+                'key_levels': self.get_key_levels(smc),
+                'recommendation': self.get_recommendation(signal_strength, indicators.get('rsi', 50))
+            }
+        except Exception as e:
+            logger.error(f"Error getting telegram summary: {e}")
+            return None
+
+    def calculate_signal_strength(self, smc, indicators):
+        strength = 0
+        if smc.get('break_of_structure'): strength += len(smc['break_of_structure']) * 0.3
+        if smc.get('fair_value_gaps'): strength += len(smc['fair_value_gaps']) * 0.2
+        if smc.get('order_blocks'): strength += len(smc['order_blocks']) * 0.1
+        rsi = indicators.get('rsi', 50)
+        if rsi > 70 or rsi < 30: strength += 0.5
+        return min(strength, 10)
+
+    def determine_trend(self, smc):
+        if not smc.get('break_of_structure'): return 'neutral'
+        latest_bos = smc['break_of_structure'][-1]
+        return 'bullish' if latest_bos['type'] == 'bullish_bos' else 'bearish'
+
+    def get_key_levels(self, smc):
+        levels = []
+        for ob in smc.get('order_blocks', [])[-3:]:
+            levels.append({'type': 'order_block', 'price': (ob['high'] + ob['low']) / 2, 'direction': ob['type']})
+        for lz in smc.get('liquidity_zones', [])[-3:]:
+            levels.append({'type': 'liquidity', 'price': lz['price'], 'direction': lz['type']})
+        return levels
+
+    def get_recommendation(self, signal_strength, rsi):
+        if signal_strength > 7 and rsi < 30: return "🚀 STRONG BUY"
+        elif signal_strength > 5 and rsi < 40: return "📈 BUY"
+        elif signal_strength > 7 and rsi > 70: return "🔴 STRONG SELL"
+        elif signal_strength > 5 and rsi > 60: return "📉 SELL"
+        else: return "⏸️ HOLD/WAIT"
+        
     def extract_recent_signals(self, df):
         signals = {'entry_long': [], 'entry_short': [], 'exit_long': [], 'exit_short': []}
         recent_df = df.tail(50)
@@ -179,11 +230,7 @@ class AdvancedSMC:
         order_blocks = []
         for _, row in df.iterrows():
             if row.get('OB', 0) != 0:
-                order_blocks.append({
-                    'type': 'bullish_ob' if row['OB'] == 1 else 'bearish_ob',
-                    'high': row.get('Top_OB'), 'low': row.get('Bottom_OB'),
-                    'time': int(row['timestamp'].timestamp()), 'strength': 'high'
-                })
+                order_blocks.append({'type': 'bullish_ob' if row['OB'] == 1 else 'bearish_ob', 'high': row.get('Top_OB'), 'low': row.get('Bottom_OB'), 'time': int(row['timestamp'].timestamp()), 'strength': 'high'})
         return order_blocks[-10:]
 
     def extract_liquidity_zones(self, df):
@@ -200,19 +247,12 @@ class AdvancedSMC:
         fvgs = []
         for _, row in df.iterrows():
             if row.get('FVG', 0) != 0:
-                fvgs.append({
-                    'type': 'bullish_fvg' if row['FVG'] == 1 else 'bearish_fvg',
-                    'top': row.get('Top_FVG'), 'bottom': row.get('Bottom_FVG'),
-                    'time': int(row['timestamp'].timestamp()), 'filled': False
-                })
+                fvgs.append({'type': 'bullish_fvg' if row['FVG'] == 1 else 'bearish_fvg', 'top': row.get('Top_FVG'), 'bottom': row.get('Bottom_FVG'), 'time': int(row['timestamp'].timestamp()), 'filled': False})
         return fvgs[-20:]
 
     def extract_break_of_structure(self, df):
         bos_signals = []
         for _, row in df.iterrows():
             if row.get('BOS', 0) != 0:
-                bos_signals.append({
-                    'type': 'bullish_bos' if row['BOS'] == 1 else 'bearish_bos',
-                    'price': row['close'], 'time': int(row['timestamp'].timestamp()), 'strength': 'confirmed'
-                })
+                bos_signals.append({'type': 'bullish_bos' if row['BOS'] == 1 else 'bearish_bos', 'price': row['close'], 'time': int(row['timestamp'].timestamp()), 'strength': 'confirmed'})
         return bos_signals[-10:]

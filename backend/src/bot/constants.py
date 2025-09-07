@@ -2,34 +2,30 @@
 
 # --- Texts ---
 WELCOME_TEXT = """
-🚀 **SMC Trading Bot!**
+🚀 **Alpha Signal!**
 
-Chọn một tùy chọn bên dưới để bắt đầu:
-
-💡 **Tính năng mới:**
-• Nhập bất kỳ token nào có trên Binance!
-• Tự động theo dõi với cập nhật mỗi giờ!
+Choose an option below to get started
 """
 
 HELP_TEXT = """
-ℹ️ **Hướng dẫn sử dụng SMC Trading Bot**
+ℹ️ **Alpha Signal User Guide**
 
-**🎯 Tính năng chính:**
-• Phân tích theo SMC (Smart Money Concepts)
-• Xác định Order Blocks, Fair Value Gaps
-• Tín hiệu Break of Structure, Vùng thanh khoản
+**🎯 Main Features:**
+• Analysis based on SMC (Smart Money Concepts)
+• Identify Order Blocks, Fair Value Gaps
+• Break of Structure signals, Liquidity zones
 
-**📱 Cách sử dụng:**
-1️⃣ Chọn token từ menu hoặc nhập tùy chỉnh
-2️⃣ Xem kết quả phân tích
-3️⃣ Thêm vào watchlist nếu muốn
+**📱 How to use:**
+1️⃣ Select token from menu or enter custom
+2️⃣ View analysis results
+3️⃣ Add to watchlist if desired
 
-**⚡ Lệnh nhanh:**
-• /start - Hiển thị menu chính
-• /analysis BTC/USDT 4h - Phân tích nhanh
+**⚡ Quick commands:**
+• /start - Show main menu
+• /analysis BTC/USDT 4h - Quick analysis
 
-**⚠️ Tuyên bố miễn trừ trách nhiệm:**
-Bot chỉ cung cấp phân tích, không phải lời khuyên tài chính.
+**⚠️ Disclaimer:**
+Bot provides analysis only, not financial advice.
 """
 
 # --- User States ---
