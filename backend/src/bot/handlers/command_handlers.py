@@ -32,3 +32,23 @@ def analysis_command(update: Update, context: CallbackContext):
 def watchlist_command(update: Update, context: CallbackContext):
     """Show watchlist menu when user types command."""
     show_watchlist_menu(update, context)
+
+def subscribe_scanner_command(update: Update, context: CallbackContext):
+    """Subscribe to market scanner notifications."""
+    user_id = update.effective_user.id
+    scheduler_service = context.bot_data['scheduler_service']
+    
+    if scheduler_service.add_scanner_subscriber(user_id):
+        update.message.reply_text("✅ You have successfully subscribed to market reversal notifications from the scanner!")
+    else:
+        update.message.reply_text("ℹ️ You are already subscribed to these notifications.")
+
+def unsubscribe_scanner_command(update: Update, context: CallbackContext):
+    """Unsubscribe from market scanner notifications."""
+    user_id = update.effective_user.id
+    scheduler_service = context.bot_data['scheduler_service']
+    
+    if scheduler_service.remove_scanner_subscriber(user_id):
+        update.message.reply_text("🚫 You have unsubscribed from market scanner notifications.")
+    else:
+        update.message.reply_text("ℹ️ You are not subscribed to these notifications.")
