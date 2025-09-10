@@ -15,7 +15,7 @@ def start_command(update: Update, context: CallbackContext):
     is_newly_added = scheduler_service.add_scanner_subscriber(user_id)
     if is_newly_added:
         update.message.reply_text("You have been subscribed to market scanner notifications by default. You can unsubscribe anytime using /unsubscribe_scanner.")
-
+    
     reply_markup = keyboards.create_main_menu_keyboard()
     update.message.reply_text(const.WELCOME_TEXT, reply_markup=reply_markup, parse_mode='Markdown')
 
