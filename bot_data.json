@@ -1,0 +1,33 @@
+{
+    "watchlists": {
+        "5923776563": [
+            {
+                "symbol": "BTC/USDT",
+                "timeframe": "1h"
+            },
+            {
+                "symbol": "ETH/USDT",
+                "timeframe": "15m"
+            },
+            {
+                "symbol": "BNB/USDT",
+                "timeframe": "1d"
+            }
+        ],
+        "1029426764": [
+            {
+                "symbol": "BNB/USDT",
+                "timeframe": "5m"
+            },
+            {
+                "symbol": "BTC/USDT",
+                "timeframe": "15m"
+            },
+            {
+                "symbol": "PEPE/USDT",
+                "timeframe": "5m"
+            }
+        ]
+    },
+    "scanner_subscribers": []
+}

@@ -7,6 +7,7 @@ from telegram.error import BadRequest
 from src.bot import constants as const
 from src.bot import keyboards
 from src.bot import formatters
+from src.bot.services.scheduler_service import WATCHLIST_LIMIT
 from src.bot.utils.state_manager import set_user_state
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,8 @@ def show_watchlist_menu(update: Update, context: CallbackContext):
     
     watchlist = scheduler_service.get_user_watchlist(user_id)
     keyboard = keyboards.create_watchlist_menu_keyboard(watchlist)
-    text = "👁️ **Watchlist Management**\n\nTrack your favorite tokens and receive automatic signal notifications."
-    
+    text = "👁️ **Quản lý Watchlist**\n\nTheo dõi các token yêu thích và nhận thông báo tín hiệu tự động."
+
     # If from button (callback), edit old message
     if query:
         try:
@@ -68,11 +69,11 @@ def handle_callback(update: Update, context: CallbackContext):
 
 def perform_analysis(message: Message, context: CallbackContext, symbol: str, timeframe: str):
     """Perform analysis and update message."""
-    message.edit_text(f"🔄 **Analyzing {symbol} {timeframe}...**", parse_mode='Markdown')
+    message.edit_text(f"🔄 **Đang phân tích {symbol} {timeframe}...**", parse_mode='Markdown')
     analysis_service = context.bot_data['analysis_service']
     result = analysis_service.get_analysis_for_symbol(symbol, timeframe)
     if result.get('error'):
-        message.edit_text(f"❌ **Analysis Error**\n\n{result.get('message')}", parse_mode='Markdown')
+        message.edit_text(f"❌ **Lỗi Phân tích**\n\n{result.get('message')}", parse_mode='Markdown')
         return
     formatted_result = formatters.format_analysis_result(result)
     keyboard = keyboards.create_analysis_options_keyboard(symbol, timeframe)
@@ -90,9 +91,9 @@ def handle_watchlist_router(update: Update, context: CallbackContext, parts: lis
 
     elif sub_action == 'view':
         watchlist = scheduler_service.get_user_watchlist(user_id)
-        text = f"📋 **Your Watchlist ({len(watchlist)}/10):**\n\n"
+        text = f"📋 **Watchlist của bạn ({len(watchlist)}/{WATCHLIST_LIMIT}):**\n\n"
         if not watchlist:
-            text += "Your watchlist is empty."
+            text += "Watchlist của bạn đang trống."
         else:
             for i, item in enumerate(watchlist, 1):
                 text += f"{i}. **{item['symbol']}** (Timeframe: {item['timeframe']})\n"
@@ -102,7 +103,7 @@ def handle_watchlist_router(update: Update, context: CallbackContext, parts: lis
 
     elif sub_action == 'add_prompt':
         set_user_state(user_id, context, const.STATE_ADD_WATCHLIST)
-        text = "➕ **Add to Watchlist**\n\nEnter token and timeframe in the format:\n`TOKEN timeframe`\n\n*Example:*\n`PEPE 4h`\n`BTC/USDT 1d`"
+        text = "➕ **Thêm vào Watchlist**\n\nNhập token và khung thời gian theo định dạng:\n`TOKEN khung_thời_gian`\n\n*Ví dụ:*\n`PEPE 4h`\n`BTC/USDT 1d` \n`PEPE 15m`"
         query.edit_message_text(text, parse_mode='Markdown')
         
     elif sub_action == 'add_direct':
@@ -114,25 +115,26 @@ def handle_watchlist_router(update: Update, context: CallbackContext, parts: lis
         query.answer(result['message'], show_alert=True)
         if result['success']:
             keyboard = keyboards.create_post_add_watchlist_keyboard()
-            text = f"✅ **Success!**\n\n{result['message']}\n\nWhat would you like to do next?"
+            text = f"✅ **Thành công!**\n\n{result['message']}\n\nBạn muốn làm gì tiếp theo?"
             query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
     elif sub_action == 'remove_menu':
         watchlist = scheduler_service.get_user_watchlist(user_id)
         if not watchlist:
-            query.answer("Your watchlist is empty!", show_alert=True)
+            query.answer("Watchlist của bạn đang trống!", show_alert=True)
             return
         keyboard = keyboards.create_remove_token_keyboard(watchlist)
-        query.edit_message_text("🗑️ Choose the token you want to remove from watchlist:", reply_markup=keyboard, parse_mode='Markdown')
-        
+        query.edit_message_text("🗑️ Chọn token bạn muốn xóa khỏi watchlist:", reply_markup=keyboard,
+                                parse_mode='Markdown')
+
     elif sub_action == 'remove_confirm':
         if len(parts) < 4:
-            logger.error(f"Callback 'remove_confirm' insufficient parameters: {query.data}")
+            query.answer("Watchlist của bạn đang trống!", show_alert=True)
             return
         _, _, symbol, timeframe = parts
         success = scheduler_service.remove_from_watchlist(user_id, symbol, timeframe)
         if success:
-            query.answer(f"Removed {symbol} ({timeframe})", show_alert=True)
+            query.answer(f"Đã xóa {symbol} ({timeframe})", show_alert=True)
             show_watchlist_menu(update, context)
             
 def handle_back_to_main(query, context: CallbackContext):
