@@ -1,7 +1,5 @@
 import logging
-import os
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
-from telegram import Update
 from .services.analysis_service import BotAnalysisService
 from .services.scheduler_service import SchedulerService
 from .services.scanner_service import MarketScannerService
@@ -31,12 +29,12 @@ def notification_job(context: CallbackContext):
             if not result.get('error'):
                 suggestion = result.get('analysis', {}).get('suggestion', '')
                 # Only send notification if there's a clear BUY or SELL signal in the suggestion
-                if "BUY signal detected" in suggestion or "SELL signal detected" in suggestion:
-                    message_text = "🔔 **Watchlist Alert** 🔔\n\n" + format_analysis_result(result)
-                    try:
-                        bot.send_message(chat_id=user_id, text=message_text, parse_mode='Markdown')
-                    except Exception as e:
-                        logger.error(f"Error sending notification to user {user_id}: {e}")
+                # if "BUY signal detected" in suggestion or "SELL signal detected" in suggestion:
+                message_text = "🔔 **Watchlist Alert** 🔔\n\n" + format_analysis_result(result)
+                try:
+                    bot.send_message(chat_id=user_id, text=message_text, parse_mode='Markdown')
+                except Exception as e:
+                    logger.error(f"Error sending notification to user {user_id}: {e}")
 
 def market_scanner_job(context: CallbackContext):
     """
@@ -95,8 +93,8 @@ class TradingBot:
     def _setup_jobs(self):
         """Schedule background jobs."""
         job_queue = self.updater.job_queue
-        job_queue.run_repeating(notification_job, interval=3600, first=10)
-        job_queue.run_repeating(market_scanner_job, interval=14400, first=20)
+        job_queue.run_repeating(notification_job, interval=300, first=10)
+        # job_queue.run_repeating(market_scanner_job, interval=14400, first=20)
 
     def run(self):
         """Start running the bot."""

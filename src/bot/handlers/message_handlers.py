@@ -27,7 +27,7 @@ def handle_message(update: Update, context: CallbackContext):
     else:
         # Default, guide the user
         update.message.reply_text(
-            "🤖 Please use the buttons or /start command to interact.",
+            "🤖 Vui lòng sử dụng các nút hoặc lệnh /start để tương tác.",
             parse_mode='Markdown'
         )
 
@@ -44,7 +44,7 @@ def handle_custom_token_input(update: Update, context: CallbackContext, token_in
     reset_user_state(user_id, context)
     
     # Send temporary message and call analysis function
-    loading_msg = update.message.reply_text(f"Searching for {symbol}...", parse_mode='Markdown')
+    loading_msg = update.message.reply_text(f"Đang tìm kiếm {symbol}...", parse_mode='Markdown')
     perform_analysis(loading_msg, context, symbol, timeframe='4h')
 
 def handle_watchlist_add_input(update: Update, context: CallbackContext, text: str):
@@ -54,7 +54,7 @@ def handle_watchlist_add_input(update: Update, context: CallbackContext, text: s
     
     parts = text.split()
     if len(parts) != 2:
-        update.message.reply_text("❌ Wrong format. Please try again, example: `BTC/USDT 4h`", parse_mode='Markdown')
+        update.message.reply_text("❌ Sai định dạng. Vui lòng thử lại, ví dụ: `BTC/USDT 4h`", parse_mode='Markdown')
         return
 
     symbol = parts[0].upper()
@@ -70,7 +70,7 @@ def handle_watchlist_add_input(update: Update, context: CallbackContext, text: s
     reset_user_state(user_id, context)
     if result['success']:
         keyboard = keyboards.create_post_add_watchlist_keyboard()
-        message_text = f"✅ **Success!**\n\n{result['message']}\n\nWhat would you like to do next?"
+        message_text = f"✅ **Thành công!**\n\n{result['message']}\n\nBạn muốn làm gì tiếp theo?"
         update.message.reply_text(message_text, reply_markup=keyboard, parse_mode='Markdown')
     else:
         update.message.reply_text(result['message'])

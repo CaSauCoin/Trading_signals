@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # Define file path and watchlist limit
 PERSISTENCE_FILE = 'bot_data.json'
-WATCHLIST_LIMIT = 10
+WATCHLIST_LIMIT = 3
 
 class SchedulerService:
     """Manage Watchlist and Subscribers list with file persistence."""
