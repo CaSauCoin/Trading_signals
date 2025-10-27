@@ -49,7 +49,7 @@ class BotAnalysisService:
                 if latest_bos.get('type') == 'bullish_bos':
                     suggestions.append("📈 Xác nhận tín hiệu tăng")
                 elif latest_bos.get('type') == 'bearish_bos':
-                    suggestions.append("📉 Xác nhận tínH hiệu giảm")
+                    suggestions.append("📉 Xác nhận tín hiệu giảm")
 
 
             # Phân tích tín hiệu vào lệnh trực tiếp
@@ -57,7 +57,6 @@ class BotAnalysisService:
                 suggestions.append("🟢 Đã phát hiện tín hiệu MUA")
             if trading_signals and trading_signals.get('entry_short'):
                 suggestions.append("🔴 Đã phát hiện tín hiệu BÁN")
-
             if not suggestions:
                 return "⏸️ Thị trường đang đi ngang. Cân nhắc đứng ngoài và chờ tín hiệu rõ ràng hơn."
 

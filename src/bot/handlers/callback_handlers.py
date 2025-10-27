@@ -63,7 +63,7 @@ def handle_callback(update: Update, context: CallbackContext):
     elif action == const.CB_HELP:
         show_help(query, context)
     else:
-        query.edit_message_text("⚠️ Feature is under development...")
+        query.edit_message_text("⚠️ Tính năng mới đang được phát triển...")
 
 # --- Detailed Handlers ---
 
