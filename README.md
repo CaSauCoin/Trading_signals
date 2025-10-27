@@ -233,7 +233,7 @@ cp .env.example .env
 
 ### Run
 ```bash
-cd src
+cd srcvev
 python main.py
 ```
 
