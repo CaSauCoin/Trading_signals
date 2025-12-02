@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Sao chép file requirements.txt vào trước để tận dụng Docker layer caching.
 # Docker sẽ chỉ chạy lại bước này nếu file requirements.txt thay đổi.
-COPY backend/requirements.txt .
+COPY requirements.txt .
 
 # Nâng cấp pip và cài đặt các thư viện Python
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -33,4 +33,4 @@ ENV PYTHONPATH=/app
 
 # Lệnh để chạy ứng dụng của bạn khi container khởi động
 # Railway sẽ tự động inject biến môi trường BOT_TOKEN bạn đã cấu hình
-CMD ["python", "backend/main.py"]
+CMD ["python", "main.py"]

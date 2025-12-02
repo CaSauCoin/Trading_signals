@@ -1,29 +1,117 @@
 # --- Imports ---
 import numpy as np
 import pandas as pd
-from datetime import datetime
 import logging
-from functools import reduce
-# FIXED IMPORT TO MATCH STRUCTURE
-from .data_fetcher import fetch_ohlcv, calculate_indicators
+from .data_fetcher import fetch_ohlcv, fetch_ohlcv_yfinance, calculate_indicators
 
 logger = logging.getLogger(__name__)
+
+RELIABLE_SYMBOL_MAP = {
+    # === 1. KIM LOẠI (Sử dụng Hợp đồng Tương lai - Đuôi =F) ===
+    # (Đây là các mã ổn định hơn so với Spot =X)
+    "XAU": "GC=F",  # Vàng (Gold Futures)
+    "GOLD": "GC=F",
+    "XAG": "SI=F",  # Bạc (Silver Futures)
+    "SILVER": "SI=F",
+    "XPT": "PL=F",  # Bạch kim (Platinum Futures)
+    "PLATINUM": "PL=F",
+    "XPD": "PA=F",  # Palladium (Palladium Futures)
+    "PALLADIUM": "PA=F",
+    "COPPER": "HG=F",  # Đồng (Copper Futures)
+
+    # === 2. NGOẠI HỐI (Forex - Đuôi =X) ===
+    # --- Cặp chính ---
+    "EURUSD": "EURUSD=X",  # Euro / US Dollar
+    "GBPUSD": "GBPUSD=X",  # Bảng Anh / US Dollar
+    "USDJPY": "USDJPY=X",  # US Dollar / Yen Nhật
+    "AUDUSD": "AUDUSD=X",  # Đô la Úc / US Dollar
+    "USDCAD": "USDCAD=X",  # US Dollar / Đô la Canada
+    "USDCHF": "USDCHF=X",  # US Dollar / Franc Thụy Sĩ
+    "NZDUSD": "NZDUSD=X",  # Đô la New Zealand / US Dollar
+
+    # --- Cặp chéo (Crosses) ---
+    "EURJPY": "EURJPY=X",  # Euro / Yen Nhật
+    "GBPJPY": "GBPJPY=X",  # Bảng Anh / Yen Nhật
+    "EURGBP": "EURGBP=X",  # Euro / Bảng Anh
+    "AUDJPY": "AUDJPY=X",  # Đô la Úc / Yen Nhật
+    "CADJPY": "CADJPY=X",  # Đô la Canada / Yen Nhật
+    "CHFJPY": "CHFJPY=X",  # Franc Thụy Sĩ / Yen Nhật
+    "EURAUD": "EURAUD=X",  # Euro / Đô la Úc
+    "EURCAD": "EURCAD=X",  # Euro / Đô la Canada
+    "EURCHF": "EURCHF=X",  # Euro / Franc Thụy Sĩ
+
+    # === 3. CHỈ SỐ (Indices - Thường có tiền tố ^) ===
+    # --- Chỉ số Mỹ ---
+    "S&P500": "^GSPC",  # S&P 500
+    "SPX500": "^GSPC",
+    "US500": "^GSPC",
+    "DOWJONES": "^DJI",  # Dow Jones Industrial Average
+    "DJI": "^DJI",
+    "US30": "^DJI",
+    "NASDAQ": "^IXIC",  # NASDAQ Composite
+    "NDX": "^IXIC",
+    "US100": "^IXIC",
+    "RUSSELL2000": "^RUT",  # Russell 2000 (Small-cap)
+
+    # --- Chỉ số Biến động & Trái phiếu Mỹ ---
+    "VIX": "^VIX",  # Chỉ số Biến động (Sợ hãi)
+    "DXY": "DX-Y.NYB",  # Chỉ số Sức mạnh Đô la (US Dollar Index)
+    "US10Y": "^TNX",  # Lợi suất trái phiếu 10 năm của Mỹ
+    "US30Y": "^TYX",  # Lợi suất trái phiếu 30 năm của Mỹ
+
+    # --- Chỉ số Toàn cầu ---
+    "FTSE": "^FTSE",  # FTSE 100 (Anh)
+    "DAX": "^GDAXI",  # DAX (Đức)
+    "CAC": "^FCHI",  # CAC 40 (Pháp)
+    "NIKKEI": "^N225",  # Nikkei 225 (Nhật)
+    "HANGSENG": "^HSI",  # Hang Seng (Hong Kong)
+    "SHANGHAI": "000001.SS",  # Shanghai Composite (Trung Quốc)
+    "STOXX50E": "^STOXX50E",  # EURO STOXX 50
+
+    # === 4. NĂNG LƯỢNG & NÔNG NGHIỆP (Futures - Đuôi =F) ===
+    "OIL": "CL=F",  # Dầu thô WTI (Crude Oil)
+    "CRUDE_OIL": "CL=F",
+    "BRENT_OIL": "BZ=F",  # Dầu Brent (Brent Crude Oil)
+    "NATURAL_GAS": "NG=F",  # Khí tự nhiên
+    "GASOLINE": "RB=F",  # Xăng (Gasoline)
+
+    "CORN": "ZC=F",  # Ngô
+    "SOYBEANS": "ZS=F",  # Đậu nành
+    "WHEAT": "ZW=F",  # Lúa mì
+    "COTTON": "CT=F",  # Bông
+    "SUGAR": "SB=F",  # Đường
+    "COFFEE": "KC=F",  # Cà phê
+}
 
 def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataFrame:
     """
     This function analyzes and adds SMC columns to the DataFrame.
     """
     if len(df) < swing_lookback * 2 + 1:
-        cols = ['swing_high', 'swing_low', 'bos_choch_signal', 'BOS', 'CHOCH', 'OB', 
-                'Top_OB', 'Bottom_OB', 'FVG', 'Top_FVG', 'Bottom_FVG', 'Swept']
-        for col in cols:
-            df[col] = 0 if col not in ['Top_OB', 'Bottom_OB', 'Top_FVG', 'Bottom_FVG'] else np.nan
+        logger.warning(f"DataFrame quá nhỏ cho phân tích SMC (len: {len(df)}). Trả về các cột trống.")
+        # Khởi tạo với đúng kiểu dữ liệu để tránh lỗi downstream
+        df['swing_high'] = False  # Boolean
+        df['swing_low'] = False  # Boolean
+        df['bos_choch_signal'] = 0  # Integer
+        df['BOS'] = 0  # Integer
+        df['CHOCH'] = 0  # Integer
+        df['OB'] = 0  # Integer
+        df['Top_OB'] = np.nan  # Float
+        df['Bottom_OB'] = np.nan  # Float
+        df['FVG'] = 0  # Integer
+        df['Top_FVG'] = np.nan  # Float
+        df['Bottom_FVG'] = np.nan  # Float
+        df['Swept'] = 0  # Integer
+
         return df
 
     # --- 1. Identify Swing Highs & Swing Lows ---
     df['swing_high'] = df['high'].rolling(window=swing_lookback*2+1, center=True).max() == df['high']
     df['swing_low'] = df['low'].rolling(window=swing_lookback*2+1, center=True).min() == df['low']
-    
+
+    df['swing_high'] = df['swing_high'].fillna(False)
+    df['swing_low'] = df['swing_low'].fillna(False)
+
     # --- 2. Identify Break of Structure (BOS) and Change of Character (CHoCH) ---
     last_swing_high, last_swing_low, trend, bos_choch = np.nan, np.nan, 0, []
     for i in range(len(df)):
@@ -69,22 +157,40 @@ def analyze_smc_features(df: pd.DataFrame, swing_lookback: int = 20) -> pd.DataF
 
     # --- 5. Identify Liquidity Sweeps ---
     df['Swept'] = 0
-    recent_high = df['high'].rolling(5).max().shift(1)
-    recent_low = df['low'].rolling(5).min().shift(1)
+
+    recent_high = df['high'].rolling(5).max().shift(1).fillna(np.inf)
+    recent_low = df['low'].rolling(5).min().shift(1).fillna(-np.inf)
+
+    # recent_high = df['high'].rolling(5).max().shift(1)
+    # recent_low = df['low'].rolling(5).min().shift(1)
     df.loc[(df['high'] > recent_high) & (df['close'] < recent_high), 'Swept'] = -1
     df.loc[(df['low'] < recent_low) & (df['close'] > recent_low), 'Swept'] = 1
     return df
 
 class AdvancedSMC:
-    def __init__(self, exchange_name='binance'):
+    def __init__(self, exchange_name='okx'):
         self.exchange_name = exchange_name
         self.informative_timeframes = ['15m', '1h', '4h', '1d']
         
     def get_market_data(self, symbol, timeframe='4h', limit=200):
+        """
+        Router: Quyết định dùng ccxt (Crypto) hay yfinance (Stocks/Forex/...)
+        """
         try:
-            return fetch_ohlcv(self.exchange_name, symbol, timeframe, limit)
+            if '/' in symbol:
+                logger.info(f"Routing {symbol} to ccxt (Crypto)")
+                return fetch_ohlcv(self.exchange_name, symbol, timeframe, limit)
+            else:
+                logger.info(f"Routing {symbol} to yfinance (Stocks/Commodities)")
+                real_symbol = RELIABLE_SYMBOL_MAP.get(symbol.upper(), symbol)
+
+                if real_symbol != symbol:
+                    logger.info(f"Routing {symbol} (translated to {real_symbol}) to yfinance (Stocks/Commodities)")
+                else:
+                    logger.info(f"Routing {symbol} to yfinance (Stocks/Commodities)")
+                return fetch_ohlcv_yfinance(real_symbol, timeframe, limit)
         except Exception as e:
-            logger.error(f"Error fetching data: {e}")
+            logger.error(f"Error in get_market_data router: {e}")
             return None
 
     def analyze_smc_structure(self, df):
@@ -111,16 +217,27 @@ class AdvancedSMC:
             dataframe['enter_long'] = 0
             dataframe['enter_short'] = 0
             dataframe['enter_tag'] = ''
+
+            top_ob_safe = dataframe['Top_OB'].fillna(-np.inf)
+            bottom_ob_safe = dataframe['Bottom_OB'].fillna(np.inf)
+            top_fvg_safe = dataframe['Top_FVG'].fillna(-np.inf)
+            bottom_fvg_safe = dataframe['Bottom_FVG'].fillna(np.inf)
+
             long_conditions = (
-                (dataframe['BOS'] == 1) & (dataframe['Swept'] == 1) & 
-                (((dataframe['low'] <= dataframe['Top_OB']) & (dataframe['high'] >= dataframe['Bottom_OB']) & (dataframe['OB'] == 1)) |
-                 ((dataframe['low'] <= dataframe['Top_FVG']) & (dataframe['high'] >= dataframe['Bottom_FVG']) & (dataframe['FVG'] == 1)))
+                    (dataframe['BOS'] == 1) & (dataframe['Swept'] == 1) &
+                    (((dataframe['low'] <= top_ob_safe) & (dataframe['high'] >= bottom_ob_safe) & (
+                            dataframe['OB'] == 1)) |  # <--- Dùng | (chính xác)
+                     ((dataframe['low'] <= top_fvg_safe) & (dataframe['high'] >= bottom_fvg_safe) & (
+                             dataframe['FVG'] == 1)))
             )
             short_conditions = (
-                (dataframe['BOS'] == -1) & (dataframe['Swept'] == -1) &
-                (((dataframe['low'] <= dataframe['Top_OB']) & (dataframe['high'] >= dataframe['Bottom_OB']) & (dataframe['OB'] == -1)) |
-                 ((dataframe['low'] <= dataframe['Top_FVG']) & (dataframe['high'] >= dataframe['Bottom_FVG']) & (dataframe['FVG'] == -1)))
+                    (dataframe['BOS'] == -1) & (dataframe['Swept'] == -1) &
+                    (((dataframe['low'] <= top_ob_safe) & (dataframe['high'] >= bottom_ob_safe) & (
+                            dataframe['OB'] == -1)) |  # <--- Dùng | (chính xác)
+                     ((dataframe['low'] <= top_fvg_safe) & (dataframe['high'] >= bottom_fvg_safe) & (
+                             dataframe['FVG'] == -1)))
             )
+
             dataframe.loc[long_conditions, 'enter_long'] = 1
             dataframe.loc[long_conditions, 'enter_tag'] = 'long_smc_simple'
             dataframe.loc[short_conditions, 'enter_short'] = 1
@@ -235,8 +352,16 @@ class AdvancedSMC:
 
     def extract_liquidity_zones(self, df):
         liquidity_zones = []
-        swing_highs = df[df.get('swing_high', False) == True]
-        swing_lows = df[df.get('swing_low', False) == True]
+        if 'swing_high' in df.columns:
+            swing_highs = df[df['swing_high'] == True]
+        else:
+            swing_highs = df.iloc[0:0]
+
+        if 'swing_low' in df.columns:
+            swing_lows = df[df['swing_low'] == True]
+        else:
+            swing_lows = df.iloc[0:0]
+
         for _, row in swing_highs.iterrows():
             liquidity_zones.append({'type': 'buy_side_liquidity', 'price': row['high'], 'time': int(row['timestamp'].timestamp()), 'strength': 'high'})
         for _, row in swing_lows.iterrows():

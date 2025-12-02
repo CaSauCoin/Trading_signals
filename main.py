@@ -1,12 +1,9 @@
 import logging
 import os
 from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv() 
-
-# Import from your source code naturally
 from src.bot.trading_bot import TradingBot
+
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(

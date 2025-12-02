@@ -1,0 +1,21 @@
+{
+    "watchlists": {
+        "5923776563": [
+            {
+                "symbol": "BTC/USDT",
+                "timeframe": "15m"
+            }
+        ]
+    },
+    "scanner_subscribers": {},
+    "watchlist_subscribers": {
+        "5923776563": "5m"
+    },
+    "notification_states": {
+        "5923776563": {
+            "BTC/USDT_15m": "Xem chi ti\u1ebft ph\u00e2n t\u00edch AI b\u00ean d\u01b0\u1edbi.",
+            "ETH/USDT_1h": "\u2022 \ud83d\udcc8 X\u00e1c nh\u1eadn t\u00edn hi\u1ec7u t\u0103ng",
+            "PEPE/USDT_30m": "\u2022 \ud83d\udcc8 X\u00e1c nh\u1eadn t\u00edn hi\u1ec7u t\u0103ng"
+        }
+    }
+}

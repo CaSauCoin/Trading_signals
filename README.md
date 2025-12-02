@@ -2,7 +2,7 @@
 
 ## 📋 Tổng quan
 
-Trading Bot SMC (Smart Money Concepts) là một bot Telegram tự động phân tích các cặp tiền điện tử sử dụng các khái niệm Smart Money như Order Blocks, Fair Value Gaps, Break of Structure và Liquidity Zones.
+Alpha Signal (Smart Money Concepts) là một bot Telegram tự động phân tích các cặp tiền điện tử sử dụng các khái niệm Smart Money như Order Blocks, Fair Value Gaps, Break of Structure và Liquidity Zones.
 
 ## 🚀 Tính năng chính
 
